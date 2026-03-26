@@ -629,19 +629,30 @@ def process_video_subprocess(video_id):
         
         # Process finished - read final results
         stdout, stderr = process.communicate()
-        
+
         if process.returncode == 0 and os.path.exists(output_json_path):
             with open(output_json_path, 'r') as f:
                 results = json.load(f)
-            
-            analysis['status'] = results.get('status', 'completed')
+
             analysis['progress'] = 100
-            analysis['reps'] = results.get('reps', 0)
-            analysis['form_score'] = results.get('form_score', 100)
-            analysis['avg_form_score'] = results.get('avg_form_score', 100)
-            analysis['grade'] = results.get('grade', 'A')
-            analysis['state'] = results.get('state', 'COMPLETED')
-            analysis['feedback'] = results.get('feedback', '')
+
+            if results.get('error'):
+                analysis['status'] = 'error' # 先判断子进程结果里有没有错误
+                analysis['error'] = results['error']
+                analysis['reps'] = results.get('reps', 0)
+                analysis['form_score'] = results.get('form_score', 0)
+                analysis['avg_form_score'] = results.get('avg_form_score', 0)
+                analysis['grade'] = results.get('grade', 'F')
+                analysis['state'] = results.get('state', 'ERROR')
+                analysis['feedback'] = results.get('feedback', results['error'])
+            else:
+                analysis['status'] = results.get('status', 'completed')
+                analysis['reps'] = results.get('reps', 0)
+                analysis['form_score'] = results.get('form_score', 100)
+                analysis['avg_form_score'] = results.get('avg_form_score', 100)
+                analysis['grade'] = results.get('grade', 'A')
+                analysis['state'] = results.get('state', 'COMPLETED')
+                analysis['feedback'] = results.get('feedback', '')
             
             # Get actual output video path from results (extension may have changed)
             actual_output_video = results.get('output_video', output_video_path)
@@ -664,6 +675,7 @@ def process_video_subprocess(video_id):
             logger.info(f"Video processing completed: {analysis['reps']} reps, output: {output_video_path}")
         else:
             analysis['status'] = 'error'
+            err_text = stderr or stdout or f"Subprocess exited with code {process.returncode}"
             analysis['error'] = f"Subprocess failed: {stderr.decode()}"
             logger.error(f"Subprocess error: {stderr.decode()}")
         
@@ -728,6 +740,7 @@ def get_video_status(video_id):
         'grade': analysis['grade'],
         'state': analysis['state'],
         'feedback': analysis['feedback'],
+        'error': analysis.get('error'),  # 加上这一行
         'has_processed_video': has_processed_video,
         'processed_video_url': f'/api/video/processed/{video_id}' if has_processed_video else None
     })
