@@ -582,3 +582,38 @@
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
+/* ==================== Trampoline Mode Styles ==================== */
+
+/* Action card */
+.action-card {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%) !important;
+}
+
+.action-card.hidden {
+    display: none;
+}
+
+.action-name {
+    font-size: 1.4rem !important;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.action-name.action-tuck { color: #ffeb3b !important; }
+.action-name.action-pike { color: #ff9800 !important; }
+.action-name.action-straight { color: #ffffff !important; }
+.action-name.action-unknown { color: rgba(255,255,255,0.5) !important; }
+
+/* Trampoline description */
+.trampoline-desc {
+    font-size: 0.9rem;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+/* Jump flight info in report */
+.jump-flight-info {
+    font-size: 0.75rem;
+    opacity: 0.7;
+}

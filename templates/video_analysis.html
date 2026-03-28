@@ -3,22 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Analysis - Fitness Trainer</title>
+    <title>Video Analysis - {% if mode == 'trampoline' %}Trampoline{% else %}Fitness Trainer{% endif %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/video_analysis.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
+    <div class="container" data-mode="{{ mode }}">
         <header>
-            <h1>🎬 Video Analysis</h1>
-            <p>Upload a video to analyze your exercise form</p>
+            <h1 id="page-title">{% if mode == 'trampoline' %}Trampoline Analysis{% else %}Video Analysis{% endif %}</h1>
+            <p id="page-subtitle">{% if mode == 'trampoline' %}Upload a trampoline video for jump segmentation and action classification{% else %}Upload a video to analyze your exercise form{% endif %}</p>
             <nav class="nav-links">
                 <a href="/" class="nav-link">← Live Camera</a>
-                <a href="/dashboard" class="nav-link">📊 Dashboard</a>
+                {% if mode == 'trampoline' %}
+                <a href="/video_analysis" class="nav-link">Fitness Mode</a>
+                {% else %}
+                <a href="/video_analysis?mode=trampoline" class="nav-link">Trampoline Mode</a>
+                {% endif %}
+                <a href="/dashboard" class="nav-link">Dashboard</a>
             </nav>
         </header>
-        
+
         <div class="main-content">
             <!-- Left Panel - Video Player -->
             <div class="video-panel">
@@ -35,7 +40,7 @@
                     </video>
                     <canvas id="analysis-canvas" hidden></canvas>
                 </div>
-                
+
                 <div class="video-controls">
                     <div class="progress-container">
                         <div class="progress-bar" id="analysis-progress">
@@ -51,11 +56,11 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Right Panel - Controls & Results -->
             <div class="analysis-panel">
-                <!-- Exercise Selection -->
-                <div class="section exercise-selection">
+                <!-- Exercise Selection (fitness mode) -->
+                <div class="section exercise-selection" id="fitness-selector">
                     <h2>Select Exercise</h2>
                     <select id="exercise-select" class="exercise-dropdown">
                         <option value="">-- Select Exercise --</option>
@@ -65,13 +70,23 @@
                         <p id="mini-description"></p>
                     </div>
                 </div>
-                
+
+                <!-- Trampoline Mode Selector -->
+                <div class="section exercise-selection hidden" id="trampoline-selector">
+                    <h2>Trampoline Analysis</h2>
+                    <p class="trampoline-desc">Upload a trampoline routine video for jump and action analysis</p>
+                    <select id="trampoline-difficulty" class="exercise-dropdown">
+                        <option value="standard" selected>Standard Analysis</option>
+                        <option value="competition">Competition Mode</option>
+                    </select>
+                </div>
+
                 <!-- Real-time Stats -->
                 <div class="section stats-section">
-                    <h2>📊 Live Statistics</h2>
+                    <h2>Live Statistics</h2>
                     <div class="stats-grid">
                         <div class="stat-card">
-                            <span class="stat-label">Repetitions</span>
+                            <span class="stat-label" id="count-label">Repetitions</span>
                             <span class="stat-value" id="stat-reps">0</span>
                         </div>
                         <div class="stat-card">
@@ -83,12 +98,17 @@
                             <span class="stat-value grade" id="stat-grade">--</span>
                         </div>
                         <div class="stat-card">
-                            <span class="stat-label">Current State</span>
+                            <span class="stat-label" id="state-label">Current State</span>
                             <span class="stat-value small" id="stat-state">--</span>
+                        </div>
+                        <!-- Action card (trampoline mode only) -->
+                        <div class="stat-card action-card hidden" id="action-card">
+                            <span class="stat-label">Action</span>
+                            <span class="stat-value action-name" id="stat-action">--</span>
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Form Score Gauge -->
                 <div class="section gauge-section">
                     <h2>Form Quality</h2>
@@ -100,10 +120,10 @@
                         <div class="gauge-value" id="gauge-value">--</div>
                     </div>
                 </div>
-                
+
                 <!-- Feedback Log -->
                 <div class="section feedback-section">
-                    <h2>💬 Form Feedback</h2>
+                    <h2>Form Feedback</h2>
                     <div class="feedback-log" id="feedback-log">
                         <div class="feedback-item info">
                             <span class="feedback-time">--:--</span>
@@ -111,22 +131,22 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Final Report -->
                 <div class="section report-section hidden" id="report-section">
-                    <h2>📋 Analysis Report</h2>
+                    <h2>Analysis Report</h2>
                     <div class="report-content" id="report-content">
                         <!-- Filled by JS after analysis -->
                     </div>
-                    <button class="btn primary-btn" id="download-report-btn">📥 Download Report</button>
+                    <button class="btn primary-btn" id="download-report-btn">Download Report</button>
                 </div>
             </div>
         </div>
-        
+
         <!-- Processing Terminal Log -->
         <div class="terminal-section" id="terminal-section">
             <div class="terminal-header">
-                <span class="terminal-title">📟 Processing Log</span>
+                <span class="terminal-title">Processing Log</span>
                 <div class="terminal-controls">
                     <span class="terminal-status" id="terminal-status">● Idle</span>
                     <button class="terminal-toggle" id="terminal-toggle">▼</button>
@@ -139,7 +159,7 @@
             </div>
         </div>
     </div>
-    
+
     <script src="{{ url_for('static', filename='js/video_analysis.js') }}"></script>
 </body>
 </html>

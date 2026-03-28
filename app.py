@@ -478,7 +478,7 @@ def update_profile():
 @app.route('/video_analysis')
 def video_analysis():
     """Video analysis page"""
-    return render_template('video_analysis.html')
+    return render_template('video_analysis.html', mode=request.args.get('mode', 'fitness'))
 
 @app.route('/api/video/upload', methods=['POST'])
 def upload_video():
@@ -531,7 +531,10 @@ def upload_video():
             })
     
     # Initialize analysis state
+    is_trampoline = (exercise_type == "trampoline")
+
     video_analyses[video_id] = {
+        'mode': 'trampoline' if is_trampoline else 'fitness',
         'status': 'processing',
         'progress': 0,
         'filepath': filepath,
@@ -539,16 +542,19 @@ def upload_video():
         'reps': 0,
         'form_score': 100,
         'avg_form_score': 100,
-        'grade': 'A',
+        'grade': 'A' if not is_trampoline else '--',
         'state': 'READY',
         'feedback': '',
-        'engine': ExerciseEngine(),
+        'engine': None if is_trampoline else ExerciseEngine(),
         'total_frames': 0,
-        'processed_frames': 0
+        'processed_frames': 0,
+        'current_action': '--',
+        'completed_jumps': [],
     }
-    
+
     # Load exercise into engine (not used in subprocess mode, but keep for status)
-    video_analyses[video_id]['engine'].set_exercise(exercise_type)
+    if not is_trampoline and video_analyses[video_id]['engine']:
+        video_analyses[video_id]['engine'].set_exercise(exercise_type)
     
     # Start background processing using subprocess
     thread = threading.Thread(target=process_video_subprocess, args=(video_id,))
@@ -624,6 +630,10 @@ def process_video_subprocess(video_id):
                     analysis['grade'] = results.get('grade', 'A')
                     analysis['state'] = results.get('state', 'UNKNOWN')
                     analysis['feedback'] = results.get('feedback', '')
+                    # Trampoline-specific fields
+                    if results.get('mode') == 'trampoline':
+                        analysis['current_action'] = results.get('current_action', '--')
+                        analysis['completed_jumps'] = results.get('completed_jumps', [])
             except:
                 pass
         
@@ -653,6 +663,11 @@ def process_video_subprocess(video_id):
                 analysis['grade'] = results.get('grade', 'A')
                 analysis['state'] = results.get('state', 'COMPLETED')
                 analysis['feedback'] = results.get('feedback', '')
+
+            # Trampoline-specific final fields
+            if results.get('mode') == 'trampoline':
+                analysis['current_action'] = results.get('current_action', '--')
+                analysis['completed_jumps'] = results.get('completed_jumps', [])
             
             # Get actual output video path from results (extension may have changed)
             actual_output_video = results.get('output_video', output_video_path)
@@ -740,9 +755,12 @@ def get_video_status(video_id):
         'grade': analysis['grade'],
         'state': analysis['state'],
         'feedback': analysis['feedback'],
-        'error': analysis.get('error'),  # 加上这一行
+        'error': analysis.get('error'),
         'has_processed_video': has_processed_video,
-        'processed_video_url': f'/api/video/processed/{video_id}' if has_processed_video else None
+        'processed_video_url': f'/api/video/processed/{video_id}' if has_processed_video else None,
+        'mode': analysis.get('mode', 'fitness'),
+        'current_action': analysis.get('current_action', '--'),
+        'completed_jumps': analysis.get('completed_jumps', []),
     })
 
 @app.route('/api/video/analyze_frame', methods=['POST'])
@@ -777,13 +795,15 @@ if __name__ == '__main__':
         
         logger.info("Starting the Flask application on http://127.0.0.1:5000")
         print("=" * 50)
-        print("🏋️ FITNESS TRAINER WITH POSE ESTIMATION")
+        print("FITNESS TRAINER WITH POSE ESTIMATION")
         print("=" * 50)
-        print(f"📋 Available exercises: {len(exercises)}")
+        print(f"Available exercises: {len(exercises)}")
         for ex in exercises:
-            print(f"   • {ex}")
+            print(f"   - {ex}")
         print("-" * 50)
-        print("🌐 Open http://127.0.0.1:5000 in your browser")
+        print("Trampoline mode: /video_analysis?mode=trampoline")
+        print("-" * 50)
+        print("Open http://127.0.0.1:5000 in your browser")
         print("=" * 50)
         app.run(debug=False, threaded=False, use_reloader=False)
     except Exception as e:

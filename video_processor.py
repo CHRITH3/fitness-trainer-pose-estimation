@@ -221,8 +221,15 @@ def draw_stats_overlay(frame, stats):
 def process_video(video_path: str, exercise_type: str, output_json_path: str, output_video_path: str = None):
     """Process video, draw skeleton, and write results"""
     import mediapipe as mp
-    from exercises.engine import ExerciseEngine
-    
+
+    is_trampoline = (exercise_type == "trampoline")
+
+    if is_trampoline:
+        from trampoline.analyzer import TrampolineAnalyzer
+        from trampoline.overlay import draw_trampoline_overlay
+    else:
+        from exercises.engine import ExerciseEngine
+
     results = {
         'status': 'processing',
         'progress': 0,
@@ -233,7 +240,10 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         'state': 'READY',
         'feedback': '',
         'error': None,
-        'output_video': output_video_path
+        'output_video': output_video_path,
+        'mode': 'trampoline' if is_trampoline else 'fitness',
+        'current_action': '--',
+        'completed_jumps': [],
     }
     
     def save_results():
@@ -331,15 +341,22 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         )
         print("MediaPipe Pose initialized")
         
-        # Initialize exercise engine
-        engine = ExerciseEngine()
-        if not engine.set_exercise(exercise_type):
-            print(f"WARNING: Failed to load exercise: {exercise_type}")
+        # Initialize analysis engine
+        if is_trampoline:
+            analyzer = TrampolineAnalyzer(fps=fps)
+            print(f"Trampoline analyzer initialized (fps={fps:.1f})")
         else:
-            print(f"Exercise loaded: {exercise_type}")
-        
+            engine = ExerciseEngine()
+            if not engine.set_exercise(exercise_type):
+                print(f"WARNING: Failed to load exercise: {exercise_type}")
+            else:
+                print(f"Exercise loaded: {exercise_type}")
+
         frame_count = 0
-        analyze_skip = max(1, int(fps / 8))  # Analyze at ~8 fps
+        if is_trampoline:
+            analyze_skip = max(1, int(fps / 15))  # ~15 fps for jump detection
+        else:
+            analyze_skip = max(1, int(fps / 8))  # ~8 fps for exercises
         print(f"Analyze skip: {analyze_skip} (analyzing at ~{fps/analyze_skip:.1f} fps)")
         
         # Current stats for overlay
@@ -348,54 +365,83 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
             'form_score': 100,
             'grade': 'A',
             'state': 'READY',
-            'feedback': ''
+            'feedback': '',
+            'jump_count': 0,
+            'current_action': '--',
+            'phase': 'unknown',
+            'velocity': 0,
+            'trunk_thigh_angle': 0,
+            'thigh_shin_angle': 0,
         }
-        
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
+
             frame_count += 1
             results['progress'] = int((frame_count / total_frames) * 100)
-            
+
             # Process with MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pose_results = pose.process(rgb_frame)
-            
+
             if pose_results.pose_landmarks:
                 # Draw skeleton on frame
                 frame = draw_skeleton(frame, pose_results.pose_landmarks, mp_pose, mp_drawing)
-                
-                # Analyze exercise periodically
+
+                # Analyze periodically
                 if frame_count % analyze_skip == 0:
-                    class SimpleResults:
-                        def __init__(self, landmarks):
-                            self.pose_landmarks = landmarks
-                    
-                    # Pass landmarks.landmark (the actual list) to engine
-                    engine.process_frame(frame, pose_results.pose_landmarks.landmark)
-                    status = engine.get_status()
-                    
-                    current_stats['reps'] = status.get('counter', 0)
-                    current_stats['form_score'] = status.get('form_score', 100)
-                    current_stats['grade'] = status.get('form_grade', 'A')
-                    current_stats['state'] = status.get('current_state', 'UNKNOWN')
-                    current_stats['feedback'] = status.get('feedback', '')
-                    
-                    results['reps'] = current_stats['reps']
-                    results['form_score'] = current_stats['form_score']
-                    results['avg_form_score'] = status.get('avg_form_score', 100)
-                    results['grade'] = current_stats['grade']
-                    results['state'] = current_stats['state']
-                    results['feedback'] = current_stats['feedback']
-                    
-                    # Debug: print counter every 30 analyze frames
-                    if (frame_count // analyze_skip) % 30 == 0:
-                        print(f"[Frame {frame_count}] Counter: {status.get('counter', 0)}, State: {status.get('current_state')}, Left: {status.get('counter_left', 'N/A')}, Right: {status.get('counter_right', 'N/A')}")
-            
+                    if is_trampoline:
+                        tramp_result = analyzer.process_frame(frame, pose_results.pose_landmarks.landmark)
+                        current_stats['reps'] = tramp_result['jump_count']
+                        current_stats['jump_count'] = tramp_result['jump_count']
+                        current_stats['current_action'] = tramp_result['current_action']
+                        current_stats['phase'] = tramp_result['phase']
+                        current_stats['velocity'] = tramp_result['velocity']
+                        current_stats['trunk_thigh_angle'] = tramp_result['trunk_thigh_angle']
+                        current_stats['thigh_shin_angle'] = tramp_result['thigh_shin_angle']
+                        current_stats['state'] = tramp_result['current_action']
+                        current_stats['form_score'] = 100
+                        current_stats['grade'] = '--'
+                        current_stats['feedback'] = f"Phase: {tramp_result['phase']}"
+
+                        results['reps'] = tramp_result['jump_count']
+                        results['current_action'] = tramp_result['current_action']
+                        results['completed_jumps'] = tramp_result['completed_jumps']
+                        results['state'] = tramp_result['current_action']
+                        results['form_score'] = 100
+                        results['avg_form_score'] = 100
+                        results['grade'] = '--'
+                        results['feedback'] = f"Phase: {tramp_result['phase']}"
+
+                        if (frame_count // analyze_skip) % 30 == 0:
+                            print(f"[Frame {frame_count}] Jumps: {tramp_result['jump_count']}, Action: {tramp_result['current_action']}, Phase: {tramp_result['phase']}")
+                    else:
+                        engine.process_frame(frame, pose_results.pose_landmarks.landmark)
+                        status = engine.get_status()
+
+                        current_stats['reps'] = status.get('counter', 0)
+                        current_stats['form_score'] = status.get('form_score', 100)
+                        current_stats['grade'] = status.get('form_grade', 'A')
+                        current_stats['state'] = status.get('current_state', 'UNKNOWN')
+                        current_stats['feedback'] = status.get('feedback', '')
+
+                        results['reps'] = current_stats['reps']
+                        results['form_score'] = current_stats['form_score']
+                        results['avg_form_score'] = status.get('avg_form_score', 100)
+                        results['grade'] = current_stats['grade']
+                        results['state'] = current_stats['state']
+                        results['feedback'] = current_stats['feedback']
+
+                        if (frame_count // analyze_skip) % 30 == 0:
+                            print(f"[Frame {frame_count}] Counter: {status.get('counter', 0)}, State: {status.get('current_state')}, Left: {status.get('counter_left', 'N/A')}, Right: {status.get('counter_right', 'N/A')}")
+
             # Draw stats overlay
-            frame = draw_stats_overlay(frame, current_stats)
+            if is_trampoline:
+                frame = draw_trampoline_overlay(frame, current_stats)
+            else:
+                frame = draw_stats_overlay(frame, current_stats)
             
             # Write frame to output video
             if imageio_writer:
@@ -426,6 +472,10 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         results['grade'] = current_stats['grade']
         results['state'] = 'COMPLETED'
         results['feedback'] = current_stats['feedback']
+
+        if is_trampoline:
+            results['current_action'] = current_stats.get('current_action', '--')
+            results['completed_jumps'] = analyzer.completed_jumps
         
         # Close video writers
         if imageio_writer:
@@ -444,19 +494,25 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         
         # Debug: Print final values
         print(f"=== FINAL RESULTS ===")
+        print(f"Mode: {results.get('mode', 'fitness')}")
         print(f"Reps from current_stats: {current_stats['reps']}")
         print(f"Reps written to results: {results['reps']}")
         print(f"Form Score: {results['form_score']}")
         print(f"Grade: {results['grade']}")
         print(f"State: {results['state']}")
-        
-        # Get final status from engine for verification
-        final_status = engine.get_status()
-        print(f"Engine final counter: {final_status.get('counter', 'N/A')}")
-        print(f"Engine final state: {final_status.get('current_state', 'N/A')}")
-        if final_status.get('counter_left') is not None:
-            print(f"Engine counter_left: {final_status.get('counter_left')}")
-            print(f"Engine counter_right: {final_status.get('counter_right')}")
+
+        if is_trampoline:
+            print(f"Completed jumps: {len(analyzer.completed_jumps)}")
+            for j in analyzer.completed_jumps:
+                print(f"  Jump {j['jump_number']}: {j['action']} (flight={j['flight_frames']}f, intermediate={j['is_intermediate']})")
+        else:
+            # Get final status from engine for verification
+            final_status = engine.get_status()
+            print(f"Engine final counter: {final_status.get('counter', 'N/A')}")
+            print(f"Engine final state: {final_status.get('current_state', 'N/A')}")
+            if final_status.get('counter_left') is not None:
+                print(f"Engine counter_left: {final_status.get('counter_left')}")
+                print(f"Engine counter_right: {final_status.get('counter_right')}")
         print(f"=====================")
         
         save_results()
