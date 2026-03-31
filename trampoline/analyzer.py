@@ -2,7 +2,7 @@
 TrampolineAnalyzer — Orchestrates JumpDetector + ActionClassifier.
 
 Drop-in replacement for ExerciseEngine when processing trampoline videos.
-Compatible interface: process_frame(frame, landmarks) and get_status().
+Compatible interface: process_frame(frame, landmarks, frame_idx) and get_status().
 """
 
 from trampoline.jump_detector import JumpDetector
@@ -14,23 +14,25 @@ class TrampolineAnalyzer:
         self.fps = fps
         self.jump_detector = JumpDetector(fps)
         self.action_classifier = ActionClassifier()
-        self.frame_count = 0
         self.completed_jumps = []
         self._current_action = ActionState.UNKNOWN
 
-    def process_frame(self, frame, landmarks) -> dict:
+    def process_frame(self, frame, landmarks, frame_idx: int = None) -> dict:
         """
         Process one video frame.
 
-        Returns dict with:
-            jump_count, current_action, phase, velocity,
-            trunk_thigh_angle, thigh_shin_angle, completed_jumps
+        Args:
+            frame: video frame (numpy array)
+            landmarks: MediaPipe pose landmarks list
+            frame_idx: actual video frame number (1-based). If None, uses internal counter.
         """
-        self.frame_count += 1
+        if frame_idx is None:
+            frame_idx = len(self.jump_detector._com_y_buffer) + 1
+
         frame_shape = frame.shape[:2]  # (height, width)
 
         # Step 1: Jump detection
-        detection = self.jump_detector.process_frame(landmarks, self.frame_count)
+        detection = self.jump_detector.process_frame(landmarks, frame_idx)
 
         # Step 2: Handle phase transitions
         if detection["event"] == "takeoff":
@@ -73,14 +75,10 @@ class TrampolineAnalyzer:
         }
 
     def get_status(self) -> dict:
-        """
-        Return status dict compatible with video_processor.py expectations.
-        Maps trampoline fields to the standard interface.
-        """
         return {
             "counter": self.jump_detector.jump_count,
             "current_state": self._current_action.value,
-            "form_score": 100,       # placeholder for future scoring
+            "form_score": 100,
             "avg_form_score": 100,
             "form_grade": "--",
             "feedback": "",

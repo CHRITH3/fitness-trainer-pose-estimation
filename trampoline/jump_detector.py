@@ -2,13 +2,13 @@
 JumpDetector — Detects landing and takeoff events from per-frame landmarks.
 
 Uses vertical velocity of center-of-mass (hip midpoint) and ankle position
-to segment video into individual jumps.
+to segment video into individual jumps. Velocity is time-normalized (per second).
 """
 
 from collections import deque
 from trampoline.config import (
     LANDMARK, VELOCITY_WINDOW, LANDING_VEL_THRESHOLD, TAKEOFF_VEL_THRESHOLD,
-    MIN_JUMP_FRAMES, MIN_FLIGHT_FRAMES, CONTACT_ANKLE_Y_RATIO,
+    MIN_JUMP_FRAMES, MIN_FLIGHT_FRAMES, ANKLE_Y_EMA_ALPHA,
     INTERMEDIATE_MAX_FLIGHT_FRAMES,
 )
 
@@ -16,42 +16,38 @@ from trampoline.config import (
 class JumpDetector:
     def __init__(self, fps: float = 30.0):
         self.fps = fps
+        self._time_per_window = VELOCITY_WINDOW / fps  # seconds spanned by velocity window
 
-        # Circular buffers for velocity estimation
+        # Circular buffer for velocity estimation
         self._com_y_buffer = deque(maxlen=VELOCITY_WINDOW + 1)
 
-        # Running tracker for ankle-y range
-        self._ankle_y_min = None
-        self._ankle_y_max = None
+        # Ankle baseline tracking via EMA (adapts per-jump, not all-time)
+        self._ankle_y_ema = None          # exponential moving average of ankle y
+        self._ankle_y_contact_max = None  # max ankle y observed during current contact phase
 
-        # State
-        self.phase = "unknown"          # "unknown", "contact", "flight"
+        # State — start in contact (person is on the bed at video start)
+        self.phase = "contact"
         self._prev_velocity = 0.0
         self.jump_count = 0
 
         # Frame tracking
-        self._current_jump_start = None # frame idx of last landing
-        self._flight_start = None       # frame idx of last takeoff
-        self._frame_count = 0
+        self._current_jump_start = 0   # frame idx of last landing
+        self._flight_start = None      # frame idx of last takeoff
 
         # Completed jumps list
         self.jumps = []
-
-        # Per-jump flight frame count (for intermediate detection)
-        self._flight_frame_count = 0
 
     def process_frame(self, landmarks, frame_idx: int) -> dict:
         """
         Process one frame of landmark data.
 
         Args:
-            landmarks: MediaPipe pose landmarks list (33 elements with .x, .y, .visibility)
-            frame_idx: current frame number (1-based)
+            landmarks: MediaPipe pose landmarks list (33 elements)
+            frame_idx: actual video frame number (1-based, from video_processor)
 
         Returns:
             dict with keys: event, phase, com_y, velocity, ankle_y, jump_count
         """
-        self._frame_count = frame_idx
         result = {
             "event": None,
             "phase": self.phase,
@@ -61,58 +57,56 @@ class JumpDetector:
             "jump_count": self.jump_count,
         }
 
-        # Compute center-of-mass y (average of hip y values, normalized 0..1)
         com_y = self._compute_com_y(landmarks)
         ankle_y = self._compute_ankle_y(landmarks)
 
         if com_y is None or ankle_y is None:
-            # Landmarks not visible — hold state
             return result
 
         result["com_y"] = com_y
         result["ankle_y"] = ankle_y
 
-        # Update ankle range tracker
-        if self._ankle_y_min is None:
-            self._ankle_y_min = ankle_y
-            self._ankle_y_max = ankle_y
+        # Update ankle EMA baseline
+        if self._ankle_y_ema is None:
+            self._ankle_y_ema = ankle_y
         else:
-            self._ankle_y_min = min(self._ankle_y_min, ankle_y)
-            self._ankle_y_max = max(self._ankle_y_max, ankle_y)
+            self._ankle_y_ema = (1 - ANKLE_Y_EMA_ALPHA) * self._ankle_y_ema + ANKLE_Y_EMA_ALPHA * ankle_y
+
+        # Track contact-phase ankle max (resets each landing)
+        if self.phase == "contact":
+            if self._ankle_y_contact_max is None:
+                self._ankle_y_contact_max = ankle_y
+            else:
+                self._ankle_y_contact_max = max(self._ankle_y_contact_max, ankle_y)
 
         # Push to velocity buffer
         self._com_y_buffer.append(com_y)
 
         if len(self._com_y_buffer) < VELOCITY_WINDOW + 1:
-            # Not enough data yet
             return result
 
-        # Finite-difference velocity (positive = descending in image coords)
-        velocity = (self._com_y_buffer[-1] - self._com_y_buffer[-1 - VELOCITY_WINDOW]) / VELOCITY_WINDOW
+        # Time-normalized velocity (normalized-y per second)
+        delta_y = self._com_y_buffer[-1] - self._com_y_buffer[-1 - VELOCITY_WINDOW]
+        velocity = delta_y / self._time_per_window
         result["velocity"] = velocity
 
-        # Track flight frames
-        if self.phase == "flight":
-            self._flight_frame_count += 1
-
-        # --- Event detection ---
-        ankle_near_max = (
-            self._ankle_y_max > self._ankle_y_min
-            and ankle_y >= self._ankle_y_max * CONTACT_ANKLE_Y_RATIO
+        # --- LANDING detection ---
+        # Velocity was strongly negative (ascending) and now crosses to >= 0 (descending)
+        # AND ankle is near its baseline (person is low, near bed level)
+        ankle_near_baseline = (
+            self._ankle_y_ema is not None
+            and ankle_y >= self._ankle_y_ema * 0.95
         )
 
-        # LANDING: velocity was negative (ascending) and crosses to positive/zero
-        # AND ankle near max
         velocity_reversal_down = (
             self._prev_velocity < -LANDING_VEL_THRESHOLD
             and velocity >= 0
         )
 
-        if velocity_reversal_down and ankle_near_max and self.phase == "flight":
+        if velocity_reversal_down and ankle_near_baseline and self.phase == "flight":
             if self._flight_start is not None:
                 flight_duration = frame_idx - self._flight_start
                 if flight_duration >= MIN_FLIGHT_FRAMES:
-                    # Valid landing
                     result["event"] = "landing"
                     self.jump_count += 1
                     result["jump_count"] = self.jump_count
@@ -120,51 +114,33 @@ class JumpDetector:
                     is_intermediate = flight_duration <= INTERMEDIATE_MAX_FLIGHT_FRAMES
                     self.jumps.append({
                         "jump_number": self.jump_count,
-                        "start_frame": self._current_jump_start or 0,
+                        "start_frame": self._current_jump_start,
                         "end_frame": frame_idx,
                         "flight_start": self._flight_start,
                         "flight_end": frame_idx,
                         "flight_frames": flight_duration,
                         "is_intermediate": is_intermediate,
-                        "action": "Unknown",  # filled later by analyzer
+                        "action": "Unknown",
                     })
 
             self.phase = "contact"
             result["phase"] = "contact"
             self._current_jump_start = frame_idx
             self._flight_start = None
-            self._flight_frame_count = 0
+            # Reset contact-phase ankle tracker for next jump
+            self._ankle_y_contact_max = ankle_y
 
-        # TAKEOFF: velocity drops below threshold while in contact
-        # (person is ascending fast enough to leave the bed)
+        # --- TAKEOFF detection ---
+        # Velocity drops below threshold (person ascending fast)
         ascending_fast = velocity < TAKEOFF_VEL_THRESHOLD
 
-        if ascending_fast and self.phase in ("contact", "unknown"):
-            frames_since_landing = (
-                frame_idx - self._current_jump_start
-                if self._current_jump_start is not None
-                else MIN_JUMP_FRAMES + 1  # allow first takeoff
-            )
+        if ascending_fast and self.phase == "contact":
+            frames_since_landing = frame_idx - self._current_jump_start
             if frames_since_landing >= MIN_JUMP_FRAMES:
                 result["event"] = "takeoff"
                 self.phase = "flight"
                 result["phase"] = "flight"
                 self._flight_start = frame_idx
-                self._flight_frame_count = 0
-
-        # Bootstrap: if still unknown and we see upward motion, treat as flight
-        if self.phase == "unknown" and velocity < TAKEOFF_VEL_THRESHOLD:
-            self.phase = "flight"
-            result["phase"] = "flight"
-            self._flight_start = frame_idx
-            self._flight_frame_count = 0
-
-        # Bootstrap: if still unknown and ankle near max with downward motion,
-        # treat as contact
-        if self.phase == "unknown" and ankle_near_max and velocity >= 0:
-            self.phase = "contact"
-            result["phase"] = "contact"
-            self._current_jump_start = frame_idx
 
         self._prev_velocity = velocity
         return result

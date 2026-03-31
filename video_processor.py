@@ -393,7 +393,7 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
                 # Analyze periodically
                 if frame_count % analyze_skip == 0:
                     if is_trampoline:
-                        tramp_result = analyzer.process_frame(frame, pose_results.pose_landmarks.landmark)
+                        tramp_result = analyzer.process_frame(frame, pose_results.pose_landmarks.landmark, frame_count)
                         current_stats['reps'] = tramp_result['jump_count']
                         current_stats['jump_count'] = tramp_result['jump_count']
                         current_stats['current_action'] = tramp_result['current_action']

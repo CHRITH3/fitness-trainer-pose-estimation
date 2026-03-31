@@ -19,11 +19,11 @@ LANDMARK = {
 
 # --- Jump Detection ---
 VELOCITY_WINDOW = 5               # frames for finite-difference velocity
-LANDING_VEL_THRESHOLD = 0.002     # y-velocity reversal threshold (positive = descending)
-TAKEOFF_VEL_THRESHOLD = -0.003    # negative = ascending
+LANDING_VEL_THRESHOLD = 0.01      # y-velocity reversal threshold (positive = descending)
+TAKEOFF_VEL_THRESHOLD = -0.01     # negative = ascending
 MIN_JUMP_FRAMES = 8               # minimum frames between two landings
 MIN_FLIGHT_FRAMES = 4             # minimum airborne frames to count as a jump
-CONTACT_ANKLE_Y_RATIO = 0.97      # ankle must be within 97% of its running max
+ANKLE_Y_EMA_ALPHA = 0.05          # EMA decay for ankle baseline tracking
 
 # --- Action Classification (hysteresis) ---
 TRUNK_THIGH_ENTER = 132.0         # degrees: enter pike/tuck zone

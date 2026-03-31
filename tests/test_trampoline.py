@@ -78,7 +78,7 @@ class TestAngleBetween:
 class TestJumpDetector:
     def test_initial_state(self):
         jd = JumpDetector(fps=30.0)
-        assert jd.phase == "unknown"
+        assert jd.phase == "contact"
         assert jd.jump_count == 0
         assert len(jd.jumps) == 0
 
@@ -94,7 +94,7 @@ class TestJumpDetector:
             jd.process_frame(landmarks, i + 1)
 
         # After enough frames, should be in contact phase
-        assert jd.phase in ("contact", "unknown")
+        assert jd.phase == "contact"
 
     def test_full_jump_cycle(self):
         """Simulate a complete: contact → takeoff → flight → landing cycle."""
@@ -146,7 +146,7 @@ class TestJumpDetector:
         landmarks = [make_landmark(0.5, 0.5, visibility=0.1) for _ in range(33)]
         result = jd.process_frame(landmarks, 1)
         assert result["event"] is None
-        assert result["phase"] == "unknown"
+        assert result["phase"] == "contact"
 
 
 class TestActionClassifier:
