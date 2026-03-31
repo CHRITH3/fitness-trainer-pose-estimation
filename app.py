@@ -784,7 +784,8 @@ def analyze_video_frame():
         'form_score': analysis.get('form_score', 100) if analysis else 100,
         'grade': analysis.get('grade', 'A') if analysis else 'A',
         'state': analysis.get('state', 'PROCESSING') if analysis else 'PROCESSING',
-        'feedback': analysis.get('feedback', '') if analysis else ''
+        'feedback': analysis.get('feedback', '') if analysis else '',
+        'current_action': analysis.get('current_action', '--') if analysis else '--'
     })
 
 if __name__ == '__main__':

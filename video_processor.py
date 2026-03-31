@@ -451,8 +451,9 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
             elif out:
                 out.write(frame)
             
-            # Save intermediate results
-            if frame_count % 60 == 0:
+            # Save intermediate results (more often for trampoline for responsive UI)
+            save_interval = 15 if is_trampoline else 60
+            if frame_count % save_interval == 0:
                 save_results()
             
             # Memory management
