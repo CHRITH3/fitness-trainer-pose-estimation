@@ -1,0 +1,148 @@
+{
+  "analysis_id": "sample01",
+  "generated_at": "2026-03-26T17:45:47.177799+00:00",
+  "contact_candidates": [
+    {
+      "frame_index": 7,
+      "timestamp_ms": 292,
+      "signal_value": 0.8215316992998124,
+      "prominence": 0.0012880823388696783
+    },
+    {
+      "frame_index": 18,
+      "timestamp_ms": 750,
+      "signal_value": 0.8245518586039544,
+      "prominence": 0.0022141718864442383
+    },
+    {
+      "frame_index": 38,
+      "timestamp_ms": 1583,
+      "signal_value": 0.8262534004449844,
+      "prominence": 0.006083854436874314
+    },
+    {
+      "frame_index": 45,
+      "timestamp_ms": 1875,
+      "signal_value": 0.8212618777155877,
+      "prominence": 0.0010923317074775785
+    },
+    {
+      "frame_index": 57,
+      "timestamp_ms": 2375,
+      "signal_value": 0.8270281085371971,
+      "prominence": 0.005977331995963953
+    }
+  ],
+  "apex_candidates": [
+    {
+      "frame_index": 8,
+      "timestamp_ms": 333,
+      "signal_value": 0.8215262816846371,
+      "prominence": 0.0017789380252359877
+    },
+    {
+      "frame_index": 32,
+      "timestamp_ms": 1333,
+      "signal_value": 0.8204238599538802,
+      "prominence": 0.005829540491104179
+    },
+    {
+      "frame_index": 43,
+      "timestamp_ms": 1792,
+      "signal_value": 0.8201695460081101,
+      "prominence": 0.006083854436874314
+    },
+    {
+      "frame_index": 47,
+      "timestamp_ms": 1958,
+      "signal_value": 0.8210631081461908,
+      "prominence": 0.00587531596422175
+    },
+    {
+      "frame_index": 62,
+      "timestamp_ms": 2583,
+      "signal_value": 0.8210507765412332,
+      "prominence": 0.02331570178270337
+    }
+  ],
+  "jump_segments": [
+    {
+      "jump_id": "jump-001",
+      "sequence_index": 0,
+      "start_ms": 750,
+      "takeoff_ms": 1042,
+      "apex_ms": 1333,
+      "landing_ms": 1542,
+      "end_ms": 1583,
+      "label": null,
+      "source": "auto",
+      "confidence": 0.37151987850667645,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-001"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": null,
+      "resolved_label": null,
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": null,
+      "label_source": null,
+      "decision_reason": null,
+      "fallback_reason": null,
+      "feature_summary": null,
+      "landing_x_norm": null,
+      "landing_y_norm": null,
+      "landing_source": null,
+      "center_deviation": null,
+      "zone": null,
+      "jump_flags": []
+    },
+    {
+      "jump_id": "jump-002",
+      "sequence_index": 1,
+      "start_ms": 1583,
+      "takeoff_ms": 1708,
+      "apex_ms": 1792,
+      "landing_ms": 2167,
+      "end_ms": 2375,
+      "label": null,
+      "source": "auto",
+      "confidence": 0.5475468993186883,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-002"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": null,
+      "resolved_label": null,
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": null,
+      "label_source": null,
+      "decision_reason": null,
+      "fallback_reason": null,
+      "feature_summary": null,
+      "landing_x_norm": null,
+      "landing_y_norm": null,
+      "landing_source": null,
+      "center_deviation": null,
+      "zone": null,
+      "jump_flags": []
+    }
+  ],
+  "calibration_used": {
+    "center_point": {
+      "x": 180.00000762939453,
+      "y": 320.0
+    },
+    "frame_size": {
+      "width": 360,
+      "height": 640
+    }
+  }
+}

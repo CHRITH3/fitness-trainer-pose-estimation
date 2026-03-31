@@ -1,0 +1,1 @@
+{"status": "error", "progress": 0, "reps": 0, "form_score": 100, "avg_form_score": 100, "grade": "A", "state": "READY", "feedback": "", "error": "module 'mediapipe' has no attribute 'solutions'", "output_video": "uploads/test_processed.mp4"}

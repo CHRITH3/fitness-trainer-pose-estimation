@@ -1,0 +1,11 @@
+{
+  "analysis_id": "sample01",
+  "source_video": "samples/tra_demo/sample01.mp4",
+  "discipline": "TRA",
+  "athlete_count": 1,
+  "routine_label": "single_person_tra_demo",
+  "status": "pending",
+  "jump_segments": [],
+  "manual_overrides": [],
+  "artifacts": []
+}

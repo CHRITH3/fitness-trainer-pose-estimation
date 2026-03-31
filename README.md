@@ -176,6 +176,51 @@ Navigate to: **http://127.0.0.1:5000**
 
 ---
 
+## Trampoline Demo v1
+
+### 安装
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+### 运行
+
+```bash
+python app.py
+# open http://127.0.0.1:5000/trampoline
+
+python -m trampoline.cli analyze --video samples/tra_demo/sample01.mp4 --out artifacts/trampoline/sample01 --landmarks-only
+python -m trampoline.cli segment --analysis-dir artifacts/trampoline/sample01
+python -m trampoline.cli export --analysis-dir artifacts/trampoline/sample01
+bash scripts/check_v1_acceptance.sh samples/tra_demo/sample01.mp4
+```
+
+The Phase 4 export command writes `landing.json`, `summary.md`, and `export/analysis_bundle.zip`. The `/trampoline` page now supports upload -> calibration -> segmentation -> label review -> landing summary -> export download.
+
+### 限制
+
+- Scope is a single-person TRA demo only.
+- The landing summary is assistant metadata, not an official judging output.
+- The repo does not calculate D-score, ToF, SYN, TUM, or DMT.
+- Calibration is still a manual rectangle in v1, not a robust automatic bed detector.
+
+### 演示
+
+1. Open `/trampoline`.
+2. Upload `samples/tra_demo/sample01.mp4` or reuse the saved `sample01` analysis.
+3. Save the suggested bed rectangle, then run segmentation.
+4. Inspect jump labels, landing heatmap, center deviation, and routine flags.
+5. Click `Download Export Bundle` or run the CLI export command.
+
+See also:
+
+- `docs/v1_release_checklist.md`
+- `docs/demo_script.md`
+- `docs/execution_reports/phase_4_execution.md`
+
+---
+
 ## ➕ Adding New Exercises
 
 **No coding required!** Just create a YAML file:

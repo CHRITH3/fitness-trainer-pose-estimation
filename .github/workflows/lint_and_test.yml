@@ -1,0 +1,62 @@
+name: lint_and_test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Pytest
+        run: pytest -q
+
+  sample-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Pytest
+        run: pytest -q
+
+      - name: Sample Analysis Smoke
+        run: bash scripts/check_v1_acceptance.sh samples/tra_demo/sample01.mp4 ci-sample01
+
+      - name: Upload Sample Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-sample01-export
+          path: |
+            artifacts/trampoline/ci-sample01/landing.json
+            artifacts/trampoline/ci-sample01/summary.md
+            artifacts/trampoline/ci-sample01/export/analysis_bundle.zip

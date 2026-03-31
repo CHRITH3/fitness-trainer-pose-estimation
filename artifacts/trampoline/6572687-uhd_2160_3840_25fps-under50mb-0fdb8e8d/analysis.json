@@ -1,0 +1,534 @@
+{
+  "analysis_id": "6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d",
+  "source_video": "uploads/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d.mp4",
+  "discipline": "TRA",
+  "athlete_count": 1,
+  "routine_label": "single_person_tra_demo",
+  "status": "complete",
+  "created_at": "2026-03-27T01:45:00.440994Z",
+  "jump_segments": [
+    {
+      "jump_id": "jump-001",
+      "sequence_index": 0,
+      "start_ms": 2000,
+      "takeoff_ms": 2320,
+      "apex_ms": 2760,
+      "landing_ms": 3400,
+      "end_ms": 3560,
+      "label": "straight",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-001"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "straight",
+      "resolved_label": "straight",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.99,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=0, pike=0, straight=14; resolved to straight.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 40,
+        "mid_flight_frame_count": 14,
+        "valid_frame_count": 40,
+        "mid_flight_valid_frame_count": 14,
+        "trunk_thigh_min_angle": 159.1,
+        "trunk_thigh_max_angle": 179.263,
+        "thigh_shank_min_angle": 119.87,
+        "thigh_shank_max_angle": 177.142,
+        "representative_timestamp_ms": 2860
+      },
+      "landing_x_norm": 0.4199,
+      "landing_y_norm": 1.0088,
+      "landing_source": "feet",
+      "center_deviation": 0.515,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ]
+    },
+    {
+      "jump_id": "jump-002",
+      "sequence_index": 1,
+      "start_ms": 3560,
+      "takeoff_ms": 3840,
+      "apex_ms": 4360,
+      "landing_ms": 4720,
+      "end_ms": 4880,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-002"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.73,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=5, pike=3, straight=2; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 34,
+        "mid_flight_frame_count": 11,
+        "valid_frame_count": 30,
+        "mid_flight_valid_frame_count": 10,
+        "trunk_thigh_min_angle": 22.639,
+        "trunk_thigh_max_angle": 170.935,
+        "thigh_shank_min_angle": 60.504,
+        "thigh_shank_max_angle": 179.839,
+        "representative_timestamp_ms": 4300
+      },
+      "landing_x_norm": 0.3605,
+      "landing_y_norm": 0.7068,
+      "landing_source": "feet",
+      "center_deviation": 0.249,
+      "zone": "inner",
+      "jump_flags": []
+    },
+    {
+      "jump_id": "jump-003",
+      "sequence_index": 2,
+      "start_ms": 4880,
+      "takeoff_ms": 5000,
+      "apex_ms": 5000,
+      "landing_ms": 5240,
+      "end_ms": 5280,
+      "label": "pike",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-003"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "pike",
+      "resolved_label": "pike",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.746,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=0, pike=1, straight=1; resolved to pike.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 11,
+        "mid_flight_frame_count": 3,
+        "valid_frame_count": 10,
+        "mid_flight_valid_frame_count": 2,
+        "trunk_thigh_min_angle": 14.691,
+        "trunk_thigh_max_angle": 171.81,
+        "thigh_shank_min_angle": 146.211,
+        "thigh_shank_max_angle": 177.939,
+        "representative_timestamp_ms": 5120
+      },
+      "landing_x_norm": 0.3316,
+      "landing_y_norm": 1.1106,
+      "landing_source": "feet",
+      "center_deviation": 0.633,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ]
+    },
+    {
+      "jump_id": "jump-004",
+      "sequence_index": 3,
+      "start_ms": 5280,
+      "takeoff_ms": 5680,
+      "apex_ms": 6120,
+      "landing_ms": 6760,
+      "end_ms": 7040,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-004"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.93,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=13, pike=1, straight=0; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 45,
+        "mid_flight_frame_count": 14,
+        "valid_frame_count": 45,
+        "mid_flight_valid_frame_count": 14,
+        "trunk_thigh_min_angle": 39.691,
+        "trunk_thigh_max_angle": 178.964,
+        "thigh_shank_min_angle": 47.919,
+        "thigh_shank_max_angle": 169.065,
+        "representative_timestamp_ms": 6220
+      },
+      "landing_x_norm": 0.3866,
+      "landing_y_norm": 1.0178,
+      "landing_source": "feet",
+      "center_deviation": 0.53,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ]
+    },
+    {
+      "jump_id": "jump-005",
+      "sequence_index": 4,
+      "start_ms": 7040,
+      "takeoff_ms": 7440,
+      "apex_ms": 7880,
+      "landing_ms": 8640,
+      "end_ms": 8960,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-005"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.718,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=6, pike=5, straight=2; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 49,
+        "mid_flight_frame_count": 15,
+        "valid_frame_count": 46,
+        "mid_flight_valid_frame_count": 13,
+        "trunk_thigh_min_angle": 5.755,
+        "trunk_thigh_max_angle": 177.376,
+        "thigh_shank_min_angle": 35.501,
+        "thigh_shank_max_angle": 177.838,
+        "representative_timestamp_ms": 8000
+      },
+      "landing_x_norm": 0.545,
+      "landing_y_norm": 0.8863,
+      "landing_source": "feet",
+      "center_deviation": 0.389,
+      "zone": "edge",
+      "jump_flags": []
+    },
+    {
+      "jump_id": "jump-006",
+      "sequence_index": 5,
+      "start_ms": 8960,
+      "takeoff_ms": 9400,
+      "apex_ms": 10080,
+      "landing_ms": 10640,
+      "end_ms": 10960,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-006"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.582,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=1, pike=9, straight=6; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 51,
+        "mid_flight_frame_count": 16,
+        "valid_frame_count": 51,
+        "mid_flight_valid_frame_count": 16,
+        "trunk_thigh_min_angle": 59.512,
+        "trunk_thigh_max_angle": 179.843,
+        "thigh_shank_min_angle": 119.831,
+        "thigh_shank_max_angle": 179.465,
+        "representative_timestamp_ms": 10020
+      },
+      "landing_x_norm": 0.3262,
+      "landing_y_norm": 0.9489,
+      "landing_source": "feet",
+      "center_deviation": 0.481,
+      "zone": "edge",
+      "jump_flags": []
+    },
+    {
+      "jump_id": "jump-007",
+      "sequence_index": 6,
+      "start_ms": 10960,
+      "takeoff_ms": 11400,
+      "apex_ms": 11840,
+      "landing_ms": 12600,
+      "end_ms": 12960,
+      "label": "pike",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-007"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "pike",
+      "resolved_label": "pike",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.856,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=0, pike=11, straight=4; resolved to pike.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 51,
+        "mid_flight_frame_count": 15,
+        "valid_frame_count": 51,
+        "mid_flight_valid_frame_count": 15,
+        "trunk_thigh_min_angle": 74.197,
+        "trunk_thigh_max_angle": 179.918,
+        "thigh_shank_min_angle": 139.692,
+        "thigh_shank_max_angle": 179.749,
+        "representative_timestamp_ms": 12000
+      },
+      "landing_x_norm": 0.3841,
+      "landing_y_norm": 0.9117,
+      "landing_source": "feet",
+      "center_deviation": 0.428,
+      "zone": "edge",
+      "jump_flags": []
+    },
+    {
+      "jump_id": "jump-008",
+      "sequence_index": 7,
+      "start_ms": 12960,
+      "takeoff_ms": 13280,
+      "apex_ms": 13680,
+      "landing_ms": 14320,
+      "end_ms": 14560,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-008"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.534,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=1, pike=3, straight=9; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 41,
+        "mid_flight_frame_count": 13,
+        "valid_frame_count": 41,
+        "mid_flight_valid_frame_count": 13,
+        "trunk_thigh_min_angle": 120.93,
+        "trunk_thigh_max_angle": 179.177,
+        "thigh_shank_min_angle": 108.693,
+        "thigh_shank_max_angle": 170.419,
+        "representative_timestamp_ms": 13800
+      },
+      "landing_x_norm": 0.5527,
+      "landing_y_norm": 1.0517,
+      "landing_source": "feet",
+      "center_deviation": 0.554,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ]
+    },
+    {
+      "jump_id": "jump-009",
+      "sequence_index": 8,
+      "start_ms": 14560,
+      "takeoff_ms": 14880,
+      "apex_ms": 15640,
+      "landing_ms": 16080,
+      "end_ms": 16240,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-009"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.88,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=15, pike=0, straight=0; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 43,
+        "mid_flight_frame_count": 15,
+        "valid_frame_count": 43,
+        "mid_flight_valid_frame_count": 15,
+        "trunk_thigh_min_angle": 8.192,
+        "trunk_thigh_max_angle": 175.24,
+        "thigh_shank_min_angle": 57.838,
+        "thigh_shank_max_angle": 179.323,
+        "representative_timestamp_ms": 15480
+      },
+      "landing_x_norm": 0.5634,
+      "landing_y_norm": 0.8134,
+      "landing_source": "feet",
+      "center_deviation": 0.32,
+      "zone": "edge",
+      "jump_flags": []
+    },
+    {
+      "jump_id": "jump-010",
+      "sequence_index": 9,
+      "start_ms": 16240,
+      "takeoff_ms": 16520,
+      "apex_ms": 16760,
+      "landing_ms": 17680,
+      "end_ms": 17880,
+      "label": "tuck",
+      "source": "auto",
+      "confidence": 0.99,
+      "notes": [
+        "auto-segmented from hip/ankle vertical signal"
+      ],
+      "auto_jump_ids": [
+        "jump-010"
+      ],
+      "manual_boundary_fields": [],
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "label_confidence": 0.952,
+      "label_source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=14, pike=0, straight=0; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 42,
+        "mid_flight_frame_count": 14,
+        "valid_frame_count": 42,
+        "mid_flight_valid_frame_count": 14,
+        "trunk_thigh_min_angle": 40.401,
+        "trunk_thigh_max_angle": 170.455,
+        "thigh_shank_min_angle": 44.435,
+        "thigh_shank_max_angle": 168.673,
+        "representative_timestamp_ms": 17100
+      },
+      "landing_x_norm": 0.5719,
+      "landing_y_norm": 1.0536,
+      "landing_source": "feet",
+      "center_deviation": 0.558,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ]
+    }
+  ],
+  "manual_overrides": [],
+  "routine_summary": {
+    "jump_count": 10,
+    "landed_jump_count": 10,
+    "mean_center_deviation": 0.466,
+    "max_center_deviation": 0.633,
+    "zone_summary": {
+      "center": 0,
+      "inner": 1,
+      "edge": 4,
+      "out": 5,
+      "unknown": 0
+    },
+    "jump_flag_counts": {
+      "out_of_bed": 5
+    },
+    "routine_flags": [
+      "final_out_bounce"
+    ],
+    "notes": [
+      "Demo-only landing assistance. No official H-score or judging output is produced."
+    ]
+  },
+  "artifacts": [
+    {
+      "name": "landmarks",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/landmarks.jsonl",
+      "media_type": "jsonl",
+      "description": "Frame-wise pose landmarks generated by MediaPipe Pose."
+    },
+    {
+      "name": "frames_meta",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/frames_meta.json",
+      "media_type": "json",
+      "description": "Frame index to timestamp map and source video metadata."
+    },
+    {
+      "name": "segmentation",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/segmentation.json",
+      "media_type": "json",
+      "description": "Automatic jump segmentation with contact/apex candidates."
+    },
+    {
+      "name": "features",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/features.jsonl",
+      "media_type": "jsonl",
+      "description": "Per-jump frame features including flight-phase windows and angles."
+    },
+    {
+      "name": "labels",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/labels.json",
+      "media_type": "json",
+      "description": "Per-jump body-shape decisions, explainability, and manual overrides."
+    },
+    {
+      "name": "landing",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/landing.json",
+      "media_type": "json",
+      "description": "Normalized landing positions, zone summary, and routine flags."
+    },
+    {
+      "name": "summary",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/summary.md",
+      "media_type": "text",
+      "description": "Human-readable demo summary for landing assistance and export."
+    },
+    {
+      "name": "analysis",
+      "path": "artifacts/trampoline/6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d/analysis.json",
+      "media_type": "json",
+      "description": "High-level RoutineAnalysis payload for the demo app."
+    }
+  ]
+}

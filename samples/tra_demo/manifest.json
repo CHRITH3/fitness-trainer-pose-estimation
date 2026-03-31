@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "discipline": "TRA",
+  "scope": "single_person_demo",
+  "videos": [
+    {
+      "id": "sample01",
+      "path": "samples/tra_demo/sample01.mp4",
+      "fixture_dir": "fixtures/trampoline/sample01",
+      "expected_outputs": [
+        "fixtures/trampoline/sample01/routine_analysis.expected.json"
+      ]
+    }
+  ]
+}

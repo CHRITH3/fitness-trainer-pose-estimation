@@ -1,0 +1,46 @@
+{
+  "task_kind": "step",
+  "task_id": "tra_demo_v1",
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "step_id": "S1",
+  "step_title": "Phase 0 foundation for single-person TRA demo",
+  "step_description": "Implement all TODO.md Phase 0 work needed to pivot this repository into a single-person lightweight trampoline AI referee demo. Create the trampoline package, shared schema/CLI skeleton, Flask /trampoline shell page with navigation entry, sample/fixture conventions, test scaffolding, CI workflow, and a Phase 0 execution report markdown that records approach, commands, problems solved, and verification evidence. Preserve existing exercise functionality unless a change is required to make the new trampoline flow coexist cleanly.\n\nOutput Contract (MUST follow exactly, missing any section => REWORK):\n1. Step Identification\n2. Summary of Work\n3. Files Changed\n4. Commands Executed\n5. Verification Results\n6. Logs / Artifacts\n7. Risks & Limitations\n8. Reproduction Guide",
+  "acceptance_criteria": [
+    "Phase 0 deliverables from TODO.md exist and are wired: docs/adr/0001_tra_demo_scope.md, importable trampoline package, python -m trampoline.cli doctor, GET /trampoline shell page with upload-panel/timeline-panel/detail-panel placeholders, schema/sample/test skeletons.",
+    "Automated coverage for Phase 0 exists and passes for the new schema, doctor CLI, manifest contract, and /trampoline page smoke path; lint/test scaffolding and CI workflow are added without depending on unrelated manual steps.",
+    "A phase execution record markdown is created for Phase 0 and documents implementation thinking, commands run, problems solved, and remaining limits with paths to relevant artifacts/logs.",
+    "Only files relevant to Phase 0 scope are changed; unrelated repo areas are not refactored opportunistically."
+  ],
+  "context": {
+    "repo_overview": "Existing repo is a Flask-based fitness trainer with MediaPipe pose estimation and exercise-specific logic. New trampoline functionality should live beside the current exercise engine, not inside it.",
+    "run_dir": ".artifacts/agent_runs/tra_demo_v1_20260326T161644Z_7b2xufi/",
+    "related_files": [
+      "TODO.md",
+      "app.py",
+      "README.md",
+      "templates/",
+      "static/",
+      "requirements.txt"
+    ],
+    "constraints": [
+      "Focus only on TODO.md Phase 0 outcomes in this step.",
+      "Create a phase report markdown, e.g. docs/execution_reports/phase_0_execution.md, and include approach, commands, issues resolved, and verification summary.",
+      "Do not modify unrelated files (e.g., skill files, shim sources, .artifacts/, tool metadata) unless explicitly required by this step"
+    ]
+  },
+  "expected_outputs": [
+    "docs/adr/0001_tra_demo_scope.md",
+    "trampoline package files and importable CLI entry",
+    "Flask /trampoline route and page shell with required placeholder IDs",
+    "samples/tra_demo/manifest.json and fixtures/trampoline/README.md",
+    "pytest/ruff/playwright-or-equivalent repo test skeleton for new trampoline scope",
+    "tests for schema, doctor CLI, sample manifest, and /trampoline smoke",
+    ".github/workflows/lint_and_test.yml",
+    "docs/execution_reports/phase_0_execution.md"
+  ],
+  "allowed_actions": [
+    "edit repo files",
+    "run build/test commands",
+    "write/update docs"
+  ]
+}

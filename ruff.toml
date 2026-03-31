@@ -1,0 +1,11 @@
+line-length = 100
+exclude = [
+  ".artifacts",
+  ".codex",
+  ".git",
+  "__pycache__",
+  "uploads",
+]
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]

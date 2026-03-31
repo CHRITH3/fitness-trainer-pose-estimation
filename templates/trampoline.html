@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trampoline Demo - Fitness Trainer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/trampoline.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container trampoline-page">
+        <header>
+            <h1>Single-Person TRA Demo</h1>
+            <p>Offline landmark extraction with persistent bed calibration, automatic jump segmentation, per-jump body-shape labels, and an editable timeline.</p>
+            <nav class="nav-links">
+                <a href="/" class="nav-link">Live Camera</a>
+                <a href="/video_analysis" class="nav-link">Video Analysis</a>
+                <a href="/dashboard" class="nav-link">Dashboard</a>
+                <a href="/trampoline" class="nav-link active">Trampoline Demo</a>
+            </nav>
+        </header>
+
+        <main class="trampoline-shell">
+            <section id="upload-panel" class="shell-panel">
+                <div class="panel-kicker">Upload</div>
+                <h2>Video Intake</h2>
+                <p>Upload a single-athlete routine clip, trigger landmark extraction, and reopen saved analyses from disk.</p>
+
+                <form id="trampoline-upload-form" class="upload-form">
+                    <label class="field-label" for="trampoline-video">Video File</label>
+                    <input id="trampoline-video" name="video" type="file" accept="video/*" required>
+                    <button id="upload-submit" type="submit" class="primary-button">Upload Video</button>
+                </form>
+
+                <div class="sample-hint">
+                    Sample clip: <code>{{ bootstrap.sample_video }}</code>
+                </div>
+
+                <div class="action-row">
+                    <button id="analyze-trigger" type="button" class="secondary-button" disabled>Run Analyze</button>
+                    <button id="segment-trigger" type="button" class="secondary-button" disabled>Run Segment</button>
+                    <span id="analysis-status" class="status-pill">idle</span>
+                </div>
+
+                <div class="analysis-list-block">
+                    <h3>Existing Analyses</h3>
+                    <div id="analysis-list" class="analysis-list"></div>
+                </div>
+            </section>
+
+            <section id="detail-panel" class="shell-panel emphasis-panel">
+                <div class="panel-kicker">Preview</div>
+                <h2>Overlay Preview</h2>
+                <p id="detail-summary">Select an analysis to view its video preview, skeleton overlay, calibration, and current jump selection.</p>
+
+                <div class="preview-stack">
+                    <video id="preview-video" class="preview-video" controls playsinline preload="metadata"></video>
+                    <canvas id="overlay-canvas" class="overlay-canvas" width="360" height="640"></canvas>
+                </div>
+
+                <div class="detail-grid detail-grid-wide">
+                    <div class="detail-card">
+                        <span class="detail-label">Analysis ID</span>
+                        <span id="detail-analysis-id" class="detail-value">none</span>
+                    </div>
+                    <div class="detail-card">
+                        <span class="detail-label">Video Meta</span>
+                        <span id="detail-video-meta" class="detail-value">waiting</span>
+                    </div>
+                    <div class="detail-card">
+                        <span class="detail-label">Calibration</span>
+                        <span id="detail-calibration" class="detail-value">not saved</span>
+                    </div>
+                    <div class="detail-card">
+                        <span class="detail-label">Timeline</span>
+                        <span id="detail-timeline" class="detail-value">no jumps</span>
+                    </div>
+                </div>
+
+                <section id="summary-panel" class="summary-panel">
+                    <div class="summary-header">
+                        <div>
+                            <div class="panel-kicker">Phase 4</div>
+                            <h3>Landing Summary</h3>
+                            <p id="summary-headline" class="timeline-summary">No landing summary loaded.</p>
+                        </div>
+                        <button id="export-analysis" type="button" class="primary-button" disabled>Download Export Bundle</button>
+                    </div>
+
+                    <div class="detail-grid detail-grid-wide">
+                        <div class="detail-card">
+                            <span class="detail-label">Mean Center Deviation</span>
+                            <span id="summary-center-deviation" class="detail-value">n/a</span>
+                        </div>
+                        <div class="detail-card">
+                            <span class="detail-label">Max Center Deviation</span>
+                            <span id="summary-max-deviation" class="detail-value">n/a</span>
+                        </div>
+                        <div class="detail-card">
+                            <span class="detail-label">Zone Summary</span>
+                            <span id="summary-zone" class="detail-value">n/a</span>
+                        </div>
+                        <div class="detail-card">
+                            <span class="detail-label">Routine Flags</span>
+                            <span id="summary-flags" class="detail-value">none</span>
+                        </div>
+                    </div>
+
+                    <div class="summary-heatmap-block">
+                        <canvas id="landing-heatmap" class="landing-heatmap" width="320" height="220"></canvas>
+                        <p id="summary-markdown" class="detail-reason">No summary markdown loaded.</p>
+                    </div>
+                </section>
+            </section>
+
+            <section id="timeline-panel" class="shell-panel timeline-panel">
+                <div class="panel-kicker">Timeline</div>
+                <h2>Calibration And Jump Editing</h2>
+                <p>Save the bed corners once, then segment jumps, inspect Phase 3 labels, seek from the timeline, and persist boundary edits in <code>overrides.json</code>.</p>
+
+                <div class="timeline-layout">
+                    <div class="timeline-column">
+                        <form id="calibration-form" class="calibration-form">
+                            <div class="corner-grid">
+                                <label class="corner-card">top_left
+                                    <input data-corner="top_left" data-axis="x" type="number" step="0.1" placeholder="x">
+                                    <input data-corner="top_left" data-axis="y" type="number" step="0.1" placeholder="y">
+                                </label>
+                                <label class="corner-card">top_right
+                                    <input data-corner="top_right" data-axis="x" type="number" step="0.1" placeholder="x">
+                                    <input data-corner="top_right" data-axis="y" type="number" step="0.1" placeholder="y">
+                                </label>
+                                <label class="corner-card">bottom_right
+                                    <input data-corner="bottom_right" data-axis="x" type="number" step="0.1" placeholder="x">
+                                    <input data-corner="bottom_right" data-axis="y" type="number" step="0.1" placeholder="y">
+                                </label>
+                                <label class="corner-card">bottom_left
+                                    <input data-corner="bottom_left" data-axis="x" type="number" step="0.1" placeholder="x">
+                                    <input data-corner="bottom_left" data-axis="y" type="number" step="0.1" placeholder="y">
+                                </label>
+                            </div>
+
+                            <div class="action-row">
+                                <button id="save-calibration" type="submit" class="primary-button" disabled>Save Calibration</button>
+                                <button id="suggest-calibration" type="button" class="secondary-button">Use Suggested Rectangle</button>
+                            </div>
+                        </form>
+
+                        <div class="timeline-header-row">
+                            <div>
+                                <h3>Jump Timeline</h3>
+                                <p id="timeline-summary" class="timeline-summary">No segmentation loaded.</p>
+                            </div>
+                            <button id="save-overrides" type="button" class="primary-button" disabled>Save Overrides</button>
+                        </div>
+
+                        <div id="timeline-track" class="timeline-track" aria-live="polite"></div>
+                    </div>
+
+                    <div class="timeline-column editor-column">
+                        <div id="jump-detail-card" class="editor-card">
+                            <h3>Jump Detail</h3>
+                            <p id="jump-detail-summary" class="timeline-summary">Choose a jump block to inspect auto labels, explainability, and manual overrides.</p>
+
+                            <div class="label-detail-grid">
+                                <div class="label-detail-row">
+                                    <span class="detail-label">Auto Label</span>
+                                    <span id="jump-auto-label" class="detail-value">waiting</span>
+                                </div>
+                                <div class="label-detail-row">
+                                    <span class="detail-label">Resolved Label</span>
+                                    <span id="jump-resolved-label" class="detail-value">waiting</span>
+                                </div>
+                                <div class="label-detail-row">
+                                    <span class="detail-label">Confidence</span>
+                                    <span id="jump-label-confidence" class="detail-value">waiting</span>
+                                </div>
+                                <div class="label-detail-row">
+                                    <span class="detail-label">Feature Window</span>
+                                    <span id="jump-feature-window" class="detail-value">waiting</span>
+                                </div>
+                            </div>
+
+                            <div class="label-reason-block">
+                                <span class="detail-label">Angles</span>
+                                <p id="jump-angle-summary" class="detail-reason">No jump selected.</p>
+                            </div>
+
+                            <div class="label-reason-block">
+                                <span class="detail-label">Decision Reason</span>
+                                <p id="jump-decision-reason" class="detail-reason">No jump selected.</p>
+                            </div>
+
+                            <div class="label-reason-block">
+                                <span class="detail-label">Fallback Reason</span>
+                                <p id="jump-fallback-reason" class="detail-reason muted-detail">none</p>
+                            </div>
+
+                            <label class="boundary-card override-note-card">override_note
+                                <textarea id="label-override-note" rows="3" placeholder="optional manual reason"></textarea>
+                            </label>
+
+                            <div class="action-row override-button-row">
+                                <button id="override-tuck" type="button" class="secondary-button" disabled>Override Tuck</button>
+                                <button id="override-pike" type="button" class="secondary-button" disabled>Override Pike</button>
+                                <button id="override-straight" type="button" class="secondary-button" disabled>Override Straight</button>
+                                <button id="clear-label-override" type="button" class="secondary-button" disabled>Clear Override</button>
+                            </div>
+                        </div>
+
+                        <div class="editor-card">
+                            <h3>Selected Jump</h3>
+                            <p id="jump-editor-summary" class="timeline-summary">Choose a jump block to edit its boundaries.</p>
+                            <form id="jump-editor-form" class="jump-editor-form">
+                                <label class="boundary-card">start_ms
+                                    <input id="jump-start" data-boundary="start_ms" type="number" step="1">
+                                </label>
+                                <label class="boundary-card">takeoff_ms
+                                    <input id="jump-takeoff" data-boundary="takeoff_ms" type="number" step="1">
+                                </label>
+                                <label class="boundary-card">apex_ms
+                                    <input id="jump-apex" data-boundary="apex_ms" type="number" step="1">
+                                </label>
+                                <label class="boundary-card">landing_ms
+                                    <input id="jump-landing" data-boundary="landing_ms" type="number" step="1">
+                                </label>
+                                <label class="boundary-card">end_ms
+                                    <input id="jump-end" data-boundary="end_ms" type="number" step="1">
+                                </label>
+                            </form>
+
+                            <div class="action-row">
+                                <button id="split-jump" type="button" class="secondary-button" disabled>Split At Current Time</button>
+                                <button id="merge-jump" type="button" class="secondary-button" disabled>Merge With Next</button>
+                                <button id="reset-jump" type="button" class="secondary-button" disabled>Reset To Auto</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script id="trampoline-bootstrap" type="application/json">{{ bootstrap | tojson }}</script>
+    <script src="{{ url_for('static', filename='js/trampoline.js') }}"></script>
+</body>
+</html>

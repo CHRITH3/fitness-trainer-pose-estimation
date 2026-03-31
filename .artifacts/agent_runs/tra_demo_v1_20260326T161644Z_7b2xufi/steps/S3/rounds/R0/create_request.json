@@ -1,0 +1,45 @@
+{
+  "task_kind": "step",
+  "task_id": "tra_demo_v1",
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "step_id": "S3",
+  "step_title": "Phase 2 jump segmentation and interactive timeline",
+  "step_description": "Implement all TODO.md Phase 2 work on top of the existing Phase 1 artifacts. Deliver automatic jump segmentation from landmarks/calibration, CLI segment output, merged override support in schema/loading, and a /trampoline timeline UI that supports seek plus boundary edit, split, merge, save, and persisted reload behavior. Create a Phase 2 execution report markdown with approach, commands, issues solved, and verification evidence. Use the existing sample01 analysis artifacts as the baseline input for segmentation and UI persistence tests.\n\nOutput Contract (MUST follow exactly, missing any section => REWORK):\n1. Step Identification\n2. Summary of Work\n3. Files Changed\n4. Commands Executed\n5. Verification Results\n6. Logs / Artifacts\n7. Risks & Limitations\n8. Reproduction Guide",
+  "acceptance_criteria": [
+    "Phase 2 deliverables from TODO.md are implemented: trampoline/bounce_segmenter.py produces segmentation.json, CLI segment works against an existing analysis dir, schema supports override merge semantics, and /trampoline exposes a usable jump timeline with seek/edit/split/merge/save/reload persistence via overrides.json.",
+    "Automated coverage for Phase 2 exists and passes for contact signal extraction, segmentation golden behavior, override merge rules, CLI segment, timeline seek, and timeline edit persistence.",
+    "A real sample segmentation can be generated locally for artifacts/trampoline/sample01 and the Phase 2 execution report records commands, artifact paths, problems solved, and remaining limitations.",
+    "Only files relevant to Phase 2 scope are changed; unrelated repo areas are not refactored opportunistically."
+  ],
+  "context": {
+    "repo_overview": "Repo already supports Phase 1 landmark extraction, calibration persistence, and a preview UI. Phase 2 should build jump segmentation and an editable persisted timeline on top of those artifacts without disturbing unrelated flows.",
+    "run_dir": ".artifacts/agent_runs/tra_demo_v1_20260326T161644Z_7b2xufi/",
+    "related_files": [
+      "TODO.md",
+      "trampoline/",
+      "app.py",
+      "templates/trampoline.html",
+      "static/js/trampoline.js",
+      "artifacts/trampoline/sample01/",
+      "docs/execution_reports/phase_1_execution.md"
+    ],
+    "constraints": [
+      "Focus only on TODO.md Phase 2 outcomes in this step.",
+      "Create a phase report markdown, e.g. docs/execution_reports/phase_2_execution.md, and include approach, commands, issues resolved, and verification summary.",
+      "Keep the Phase 1 artifact contract intact while extending it with segmentation and overrides.",
+      "Do not modify unrelated files (e.g., skill files, shim sources, .artifacts/, tool metadata) unless explicitly required by this step"
+    ]
+  },
+  "expected_outputs": [
+    "working bounce segmenter and CLI segment command",
+    "segmentation.json and overrides.json support for sample01",
+    "timeline seek/edit/save UI and Flask endpoints as needed",
+    "Phase 2 unit/integration/e2e tests",
+    "docs/execution_reports/phase_2_execution.md"
+  ],
+  "allowed_actions": [
+    "edit repo files",
+    "run build/test commands",
+    "write/update docs"
+  ]
+}

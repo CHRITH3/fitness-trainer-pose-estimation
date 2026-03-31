@@ -1,0 +1,101 @@
+PARAMS
+action: create
+backend: codex
+run_id: tra_demo_v1_20260326T161644Z_7b2xufi
+step_id: S2
+round: 0
+thread_id: null
+
+PROMPT
+{
+  "task_kind": "step",
+  "task_id": "tra_demo_v1",
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "step_id": "S2",
+  "step_title": "Phase 1 video analysis baseline and bed calibration",
+  "step_description": "Implement all TODO.md Phase 1 work on top of the new trampoline foundation. Deliver a working offline analysis baseline that can process a real sample video into landmarks and frame metadata, add bed calibration persistence and transforms, expose upload/analyze/status flow plus preview/overlay behavior in the Flask app, and create a Phase 1 execution report markdown with approach, commands, issues solved, and verification evidence. You may replace the Phase 0 placeholder sample video with a lightweight real local clip from this repo if required for the pipeline and tests.\n\nOutput Contract (MUST follow exactly, missing any section => REWORK):\n1. Step Identification\n2. Summary of Work\n3. Files Changed\n4. Commands Executed\n5. Verification Results\n6. Logs / Artifacts\n7. Risks & Limitations\n8. Reproduction Guide",
+  "acceptance_criteria": [
+    "Phase 1 deliverables from TODO.md are implemented: analyze pipeline outputs landmarks.jsonl and frames_meta.json, CLI analyze supports --video/--out/--landmarks-only, calibration save/load produces calibration.json, and /trampoline supports upload plus analysis status and overlay persistence for an analysis result.",
+    "Automated coverage for Phase 1 exists and passes for pipeline smoke, frames meta, CLI analyze, bed calibration, upload/status flow, and overlay persistence; evidence includes command outputs or artifact paths for the generated analysis directory.",
+    "A real sample analysis directory can be generated locally for sample01 and the Phase 1 execution report records commands, evidence, problems solved, and remaining limitations.",
+    "Only files relevant to Phase 1 scope are changed; unrelated repo areas are not refactored opportunistically."
+  ],
+  "context": {
+    "repo_overview": "Repo now has a trampoline foundation from Phase 0. Existing exercise app remains alongside the new trampoline flow. Phase 1 should make the trampoline demo produce real analysis artifacts and a persistent calibration-aware preview flow.",
+    "run_dir": ".artifacts/agent_runs/tra_demo_v1_20260326T161644Z_7b2xufi/",
+    "related_files": [
+      "TODO.md",
+      "trampoline/",
+      "app.py",
+      "templates/trampoline.html",
+      "static/",
+      "samples/tra_demo/",
+      "docs/execution_reports/phase_0_execution.md"
+    ],
+    "constraints": [
+      "Focus only on TODO.md Phase 1 outcomes in this step.",
+      "Create a phase report markdown, e.g. docs/execution_reports/phase_1_execution.md, and include approach, commands, issues resolved, and verification summary.",
+      "You may replace samples/tra_demo/sample01.mp4 with a lightweight real local clip if needed so Phase 1 can produce actual artifacts.",
+      "Do not modify unrelated files (e.g., skill files, shim sources, .artifacts/, tool metadata) unless explicitly required by this step"
+    ]
+  },
+  "expected_outputs": [
+    "working trampoline/pipeline.py and trampoline/bed_calibration.py",
+    "CLI analyze command and artifact outputs for sample01",
+    "Flask upload/analyze/status/calibration endpoints plus preview overlay behavior",
+    "tests/integration and tests/e2e coverage for Phase 1 paths",
+    "docs/execution_reports/phase_1_execution.md"
+  ],
+  "allowed_actions": [
+    "edit repo files",
+    "run build/test commands",
+    "write/update docs"
+  ]
+}
+
+REQUEST_JSON
+{
+  "task_kind": "step",
+  "task_id": "tra_demo_v1",
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "step_id": "S2",
+  "step_title": "Phase 1 video analysis baseline and bed calibration",
+  "step_description": "Implement all TODO.md Phase 1 work on top of the new trampoline foundation. Deliver a working offline analysis baseline that can process a real sample video into landmarks and frame metadata, add bed calibration persistence and transforms, expose upload/analyze/status flow plus preview/overlay behavior in the Flask app, and create a Phase 1 execution report markdown with approach, commands, issues solved, and verification evidence. You may replace the Phase 0 placeholder sample video with a lightweight real local clip from this repo if required for the pipeline and tests.\n\nOutput Contract (MUST follow exactly, missing any section => REWORK):\n1. Step Identification\n2. Summary of Work\n3. Files Changed\n4. Commands Executed\n5. Verification Results\n6. Logs / Artifacts\n7. Risks & Limitations\n8. Reproduction Guide",
+  "acceptance_criteria": [
+    "Phase 1 deliverables from TODO.md are implemented: analyze pipeline outputs landmarks.jsonl and frames_meta.json, CLI analyze supports --video/--out/--landmarks-only, calibration save/load produces calibration.json, and /trampoline supports upload plus analysis status and overlay persistence for an analysis result.",
+    "Automated coverage for Phase 1 exists and passes for pipeline smoke, frames meta, CLI analyze, bed calibration, upload/status flow, and overlay persistence; evidence includes command outputs or artifact paths for the generated analysis directory.",
+    "A real sample analysis directory can be generated locally for sample01 and the Phase 1 execution report records commands, evidence, problems solved, and remaining limitations.",
+    "Only files relevant to Phase 1 scope are changed; unrelated repo areas are not refactored opportunistically."
+  ],
+  "context": {
+    "repo_overview": "Repo now has a trampoline foundation from Phase 0. Existing exercise app remains alongside the new trampoline flow. Phase 1 should make the trampoline demo produce real analysis artifacts and a persistent calibration-aware preview flow.",
+    "run_dir": ".artifacts/agent_runs/tra_demo_v1_20260326T161644Z_7b2xufi/",
+    "related_files": [
+      "TODO.md",
+      "trampoline/",
+      "app.py",
+      "templates/trampoline.html",
+      "static/",
+      "samples/tra_demo/",
+      "docs/execution_reports/phase_0_execution.md"
+    ],
+    "constraints": [
+      "Focus only on TODO.md Phase 1 outcomes in this step.",
+      "Create a phase report markdown, e.g. docs/execution_reports/phase_1_execution.md, and include approach, commands, issues resolved, and verification summary.",
+      "You may replace samples/tra_demo/sample01.mp4 with a lightweight real local clip if needed so Phase 1 can produce actual artifacts.",
+      "Do not modify unrelated files (e.g., skill files, shim sources, .artifacts/, tool metadata) unless explicitly required by this step"
+    ]
+  },
+  "expected_outputs": [
+    "working trampoline/pipeline.py and trampoline/bed_calibration.py",
+    "CLI analyze command and artifact outputs for sample01",
+    "Flask upload/analyze/status/calibration endpoints plus preview overlay behavior",
+    "tests/integration and tests/e2e coverage for Phase 1 paths",
+    "docs/execution_reports/phase_1_execution.md"
+  ],
+  "allowed_actions": [
+    "edit repo files",
+    "run build/test commands",
+    "write/update docs"
+  ]
+}

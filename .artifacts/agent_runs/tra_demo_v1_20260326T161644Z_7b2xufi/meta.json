@@ -1,0 +1,14 @@
+{
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "created_at": "2026-03-26T16:17:35.332854+00:00",
+  "repo": {
+    "path": "/home/chris4/workspace/from_git/fitness-trainer-pose-estimation",
+    "branch": "trampoline_v1",
+    "commit": "58d4c10878554039cc701d3056f19813bc157780",
+    "commit_short": "58d4c10",
+    "dirty": true
+  },
+  "policy": {
+    "max_rework_rounds_per_step": 6
+  }
+}

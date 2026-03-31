@@ -1,0 +1,52 @@
+{
+  "analysis_id": "sample01",
+  "labels": [
+    {
+      "jump_id": "jump-001",
+      "sequence_index": 0,
+      "auto_label": "pike",
+      "resolved_label": "pike",
+      "override_label": null,
+      "override_note": null,
+      "confidence": 0.953,
+      "source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=0, pike=7, straight=0; resolved to pike.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 21,
+        "mid_flight_frame_count": 7,
+        "valid_frame_count": 21,
+        "mid_flight_valid_frame_count": 7,
+        "trunk_thigh_min_angle": 101.29,
+        "trunk_thigh_max_angle": 131.552,
+        "thigh_shank_min_angle": 149.258,
+        "thigh_shank_max_angle": 156.039,
+        "representative_timestamp_ms": 1292
+      }
+    },
+    {
+      "jump_id": "jump-002",
+      "sequence_index": 1,
+      "auto_label": "tuck",
+      "resolved_label": "tuck",
+      "override_label": null,
+      "override_note": null,
+      "confidence": 0.671,
+      "source": "rules_tra_v1",
+      "decision_reason": "mid-flight lowest-difficulty rule: tuck=2, pike=4, straight=0; resolved to tuck.",
+      "fallback_reason": null,
+      "feature_summary": {
+        "frame_count": 20,
+        "mid_flight_frame_count": 6,
+        "valid_frame_count": 20,
+        "mid_flight_valid_frame_count": 6,
+        "trunk_thigh_min_angle": 66.739,
+        "trunk_thigh_max_angle": 101.29,
+        "thigh_shank_min_angle": 126.606,
+        "thigh_shank_max_angle": 151.414,
+        "representative_timestamp_ms": 1937
+      }
+    }
+  ],
+  "generated_at": "2026-03-26T17:45:47.851584Z"
+}

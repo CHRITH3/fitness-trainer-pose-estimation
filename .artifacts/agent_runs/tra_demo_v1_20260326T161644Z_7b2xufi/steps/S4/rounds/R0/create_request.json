@@ -1,0 +1,45 @@
+{
+  "task_kind": "step",
+  "task_id": "tra_demo_v1",
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "step_id": "S4",
+  "step_title": "Phase 3 feature extraction, shape classification, and label overrides",
+  "step_description": "Implement all TODO.md Phase 3 work on top of the existing Phase 2 trampoline flow. Deliver per-jump feature extraction and body-shape labeling (`tuck`, `pike`, `straight`), add rules and explainability outputs, persist UI-visible labels/feature artifacts, and support manual label overrides with reload/export compatibility. Create a Phase 3 execution report markdown with approach, commands, issues solved, and verification evidence. Use the existing sample01 artifacts as the baseline input and keep the Phase 2 segmentation/timeline behavior intact while extending it.\n\nOutput Contract (MUST follow exactly, missing any section => REWORK):\n1. Step Identification\n2. Summary of Work\n3. Files Changed\n4. Commands Executed\n5. Verification Results\n6. Logs / Artifacts\n7. Risks & Limitations\n8. Reproduction Guide",
+  "acceptance_criteria": [
+    "Phase 3 deliverables from TODO.md are implemented: trampoline/features.py and trampoline/rules_tra.py output features.jsonl and labels.json, the analysis contract exposes per-jump auto labels/confidence/reasons/fallbacks, and /trampoline shows a jump detail panel with label summary and manual override controls that persist across reloads.",
+    "Automated coverage for Phase 3 exists and passes for angle extraction, shape classifier behavior, label golden outputs, jump detail panel behavior, label override persistence, and artifact contract compatibility.",
+    "A real sample label run can be generated locally for artifacts/trampoline/sample01 and the Phase 3 execution report records commands, artifact paths, problems solved, and remaining limitations.",
+    "Only files relevant to Phase 3 scope are changed; unrelated repo areas are not refactored opportunistically."
+  ],
+  "context": {
+    "repo_overview": "Repo already supports Phase 2 segmentation and persisted timeline editing. Phase 3 should add feature extraction, label reasoning, and manual label override flows on top of the jump timeline without regressing earlier phases.",
+    "run_dir": ".artifacts/agent_runs/tra_demo_v1_20260326T161644Z_7b2xufi/",
+    "related_files": [
+      "TODO.md",
+      "trampoline/",
+      "app.py",
+      "templates/trampoline.html",
+      "static/js/trampoline.js",
+      "artifacts/trampoline/sample01/",
+      "docs/execution_reports/phase_2_execution.md"
+    ],
+    "constraints": [
+      "Focus only on TODO.md Phase 3 outcomes in this step.",
+      "Create a phase report markdown, e.g. docs/execution_reports/phase_3_execution.md, and include approach, commands, issues resolved, and verification summary.",
+      "Keep the Phase 1 and Phase 2 artifact contracts intact while extending them with features and labels.",
+      "Do not modify unrelated files (e.g., skill files, shim sources, .artifacts/, tool metadata) unless explicitly required by this step"
+    ]
+  },
+  "expected_outputs": [
+    "working feature extraction and rules modules",
+    "features.jsonl and labels.json support for sample01",
+    "label/detail/override UI and Flask endpoints as needed",
+    "Phase 3 unit/integration/e2e tests",
+    "docs/execution_reports/phase_3_execution.md"
+  ],
+  "allowed_actions": [
+    "edit repo files",
+    "run build/test commands",
+    "write/update docs"
+  ]
+}

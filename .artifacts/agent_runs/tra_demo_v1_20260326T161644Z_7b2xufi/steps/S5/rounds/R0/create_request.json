@@ -1,0 +1,46 @@
+{
+  "task_kind": "step",
+  "task_id": "tra_demo_v1",
+  "run_id": "tra_demo_v1_20260326T161644Z_7b2xufi",
+  "step_id": "S5",
+  "step_title": "Phase 4 landing, flags, export, and v1 acceptance close-out",
+  "step_description": "Implement all TODO.md Phase 4 work and close the repo into a single-person lightweight trampoline AI referee demo v1. Add landing extraction and simplified center deviation/zone summaries, routine/jump flags, CLI export, UI summary/export behavior, v1 docs, CI/sample-analysis coverage, and the final acceptance script that runs the full sample chain. Create a Phase 4 execution report markdown with approach, commands, issues solved, and verification evidence. Use the existing sample01 artifacts as the main golden path and ensure the final repo state can demonstrate upload -> calibration -> segmentation -> labeling -> summary/export.\n\nOutput Contract (MUST follow exactly, missing any section => REWORK):\n1. Step Identification\n2. Summary of Work\n3. Files Changed\n4. Commands Executed\n5. Verification Results\n6. Logs / Artifacts\n7. Risks & Limitations\n8. Reproduction Guide",
+  "acceptance_criteria": [
+    "Phase 4 deliverables from TODO.md are implemented: landing extraction and summary/flags artifacts exist, CLI export produces analysis.json/summary.md/analysis_bundle.zip, /trampoline exposes summary and export behavior, docs are updated for v1 scope/run/demo, and scripts/check_v1_acceptance.sh runs the full sample chain successfully.",
+    "Automated coverage for Phase 4 exists and passes for landing logic, flags/zone summary logic, CLI export, summary/export UI path, and repo/sample-analysis acceptance coverage.",
+    "A real sample export bundle can be generated locally for artifacts/trampoline/sample01 and the Phase 4 execution report records commands, artifact paths, problems solved, and remaining limitations.",
+    "Only files relevant to Phase 4 scope are changed; unrelated repo areas are not refactored opportunistically."
+  ],
+  "context": {
+    "repo_overview": "Repo already supports Phase 3 feature extraction, labels, and overrides. Phase 4 should finish the lightweight trampoline AI referee demo with landing assistance, summary/export, release docs, CI, and a one-command v1 acceptance path.",
+    "run_dir": ".artifacts/agent_runs/tra_demo_v1_20260326T161644Z_7b2xufi/",
+    "related_files": [
+      "TODO.md",
+      "trampoline/",
+      "app.py",
+      "templates/trampoline.html",
+      "static/js/trampoline.js",
+      "README.md",
+      "docs/execution_reports/phase_3_execution.md",
+      "artifacts/trampoline/sample01/"
+    ],
+    "constraints": [
+      "Focus only on TODO.md Phase 4 outcomes in this step.",
+      "Create a phase report markdown, e.g. docs/execution_reports/phase_4_execution.md, and include approach, commands, issues resolved, and verification summary.",
+      "Keep earlier phase contracts intact while extending them with landing, summary, export, and final acceptance flow.",
+      "Do not modify unrelated files (e.g., skill files, shim sources, .artifacts/, tool metadata) unless explicitly required by this step"
+    ]
+  },
+  "expected_outputs": [
+    "working landing/flags/export modules and sample artifacts",
+    "summary/export UI and export bundle download path",
+    "README and release/demo docs updated for v1",
+    "CI/sample-analysis acceptance coverage and scripts/check_v1_acceptance.sh",
+    "docs/execution_reports/phase_4_execution.md"
+  ],
+  "allowed_actions": [
+    "edit repo files",
+    "run build/test commands",
+    "write/update docs"
+  ]
+}

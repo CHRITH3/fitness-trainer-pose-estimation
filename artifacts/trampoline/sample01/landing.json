@@ -1,0 +1,78 @@
+{
+  "analysis_id": "sample01",
+  "jumps": [
+    {
+      "jump_id": "jump-001",
+      "sequence_index": 0,
+      "landing_ms": 1542,
+      "landing_frame_index": 37,
+      "landing_source": "feet",
+      "landing_x_norm": 0.5543,
+      "landing_y_norm": 1.1543,
+      "center_deviation": 0.657,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_foot_index"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-002",
+      "sequence_index": 1,
+      "landing_ms": 2167,
+      "landing_frame_index": 52,
+      "landing_source": "feet",
+      "landing_x_norm": 0.5533,
+      "landing_y_norm": 1.1363,
+      "center_deviation": 0.639,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_foot_index"
+      ],
+      "valid": true
+    }
+  ],
+  "routine_summary": {
+    "jump_count": 2,
+    "landed_jump_count": 2,
+    "mean_center_deviation": 0.648,
+    "max_center_deviation": 0.657,
+    "zone_summary": {
+      "center": 0,
+      "inner": 0,
+      "edge": 0,
+      "out": 2,
+      "unknown": 0
+    },
+    "jump_flag_counts": {
+      "out_of_bed": 2
+    },
+    "routine_flags": [
+      "final_out_bounce"
+    ],
+    "notes": [
+      "Demo-only landing assistance. No official H-score or judging output is produced."
+    ]
+  },
+  "generated_at": "2026-03-26T17:45:47.856889Z"
+}

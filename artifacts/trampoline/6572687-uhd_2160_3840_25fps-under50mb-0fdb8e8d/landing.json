@@ -1,0 +1,288 @@
+{
+  "analysis_id": "6572687-uhd_2160_3840_25fps-under50mb-0fdb8e8d",
+  "jumps": [
+    {
+      "jump_id": "jump-001",
+      "sequence_index": 0,
+      "landing_ms": 3400,
+      "landing_frame_index": 85,
+      "landing_source": "feet",
+      "landing_x_norm": 0.4199,
+      "landing_y_norm": 1.0088,
+      "center_deviation": 0.515,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-002",
+      "sequence_index": 1,
+      "landing_ms": 4720,
+      "landing_frame_index": 118,
+      "landing_source": "feet",
+      "landing_x_norm": 0.3605,
+      "landing_y_norm": 0.7068,
+      "center_deviation": 0.249,
+      "zone": "inner",
+      "jump_flags": [],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-003",
+      "sequence_index": 2,
+      "landing_ms": 5240,
+      "landing_frame_index": 131,
+      "landing_source": "feet",
+      "landing_x_norm": 0.3316,
+      "landing_y_norm": 1.1106,
+      "center_deviation": 0.633,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-004",
+      "sequence_index": 3,
+      "landing_ms": 6760,
+      "landing_frame_index": 169,
+      "landing_source": "feet",
+      "landing_x_norm": 0.3866,
+      "landing_y_norm": 1.0178,
+      "center_deviation": 0.53,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-005",
+      "sequence_index": 4,
+      "landing_ms": 8640,
+      "landing_frame_index": 216,
+      "landing_source": "feet",
+      "landing_x_norm": 0.545,
+      "landing_y_norm": 0.8863,
+      "center_deviation": 0.389,
+      "zone": "edge",
+      "jump_flags": [],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-006",
+      "sequence_index": 5,
+      "landing_ms": 10640,
+      "landing_frame_index": 266,
+      "landing_source": "feet",
+      "landing_x_norm": 0.3262,
+      "landing_y_norm": 0.9489,
+      "center_deviation": 0.481,
+      "zone": "edge",
+      "jump_flags": [],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-007",
+      "sequence_index": 6,
+      "landing_ms": 12600,
+      "landing_frame_index": 315,
+      "landing_source": "feet",
+      "landing_x_norm": 0.3841,
+      "landing_y_norm": 0.9117,
+      "center_deviation": 0.428,
+      "zone": "edge",
+      "jump_flags": [],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-008",
+      "sequence_index": 7,
+      "landing_ms": 14320,
+      "landing_frame_index": 358,
+      "landing_source": "feet",
+      "landing_x_norm": 0.5527,
+      "landing_y_norm": 1.0517,
+      "center_deviation": 0.554,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-009",
+      "sequence_index": 8,
+      "landing_ms": 16080,
+      "landing_frame_index": 402,
+      "landing_source": "feet",
+      "landing_x_norm": 0.5634,
+      "landing_y_norm": 0.8134,
+      "center_deviation": 0.32,
+      "zone": "edge",
+      "jump_flags": [],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    },
+    {
+      "jump_id": "jump-010",
+      "sequence_index": 9,
+      "landing_ms": 17680,
+      "landing_frame_index": 442,
+      "landing_source": "feet",
+      "landing_x_norm": 0.5719,
+      "landing_y_norm": 1.0536,
+      "center_deviation": 0.558,
+      "zone": "out",
+      "jump_flags": [
+        "out_of_bed"
+      ],
+      "support_sides": [
+        "left",
+        "right"
+      ],
+      "source_landmarks": [
+        "left_ankle",
+        "left_foot_index",
+        "left_heel",
+        "right_ankle",
+        "right_foot_index",
+        "right_heel"
+      ],
+      "valid": true
+    }
+  ],
+  "routine_summary": {
+    "jump_count": 10,
+    "landed_jump_count": 10,
+    "mean_center_deviation": 0.466,
+    "max_center_deviation": 0.633,
+    "zone_summary": {
+      "center": 0,
+      "inner": 1,
+      "edge": 4,
+      "out": 5,
+      "unknown": 0
+    },
+    "jump_flag_counts": {
+      "out_of_bed": 5
+    },
+    "routine_flags": [
+      "final_out_bounce"
+    ],
+    "notes": [
+      "Demo-only landing assistance. No official H-score or judging output is produced."
+    ]
+  },
+  "generated_at": "2026-03-27T01:46:20.676987Z"
+}

@@ -1,0 +1,18 @@
+{
+  "analysis_id": "sample01",
+  "source_video": "samples/tra_demo/sample01.mp4",
+  "bundle_contents": [
+    "analysis.json",
+    "analysis_bundle.zip",
+    "calibration.json",
+    "export_manifest.json",
+    "features.jsonl",
+    "frames_meta.json",
+    "labels.json",
+    "landing.json",
+    "overlays/landing_heatmap.json",
+    "overlays/preview_overlay.json",
+    "segmentation.json",
+    "summary.md"
+  ]
+}

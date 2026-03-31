@@ -6,8 +6,9 @@ os.environ["TF_NUM_INTEROP_THREADS"] = "1"
 os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TF warnings
 
-from flask import Flask, render_template, Response, request, jsonify, session, redirect, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
 import cv2
+import json
 import threading
 import time
 import sys
@@ -15,6 +16,25 @@ import traceback
 import logging
 import uuid
 import numpy as np
+from pathlib import Path
+from werkzeug.utils import secure_filename
+
+from trampoline.bed_calibration import create_bed_calibration, load_calibration, save_calibration
+from trampoline.bounce_segmenter import segment_analysis_dir
+from trampoline.exporter import export_analysis_bundle
+from trampoline.pipeline import (
+    list_analysis_outputs,
+    load_analysis_output,
+    load_segmentation_payload,
+    merge_segment_overrides,
+    persist_label_override,
+    persist_timeline_overrides,
+    resolve_analysis_dir,
+    resolve_repo_path,
+    analyze_video,
+    load_overrides_artifact,
+)
+from trampoline.schema import JumpSegment
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
@@ -84,6 +104,12 @@ current_fps = 0
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 video_analyses = {}  # Store ongoing video analyses
+TRAMPOLINE_UPLOAD_DIR = Path(UPLOAD_FOLDER) / "trampoline"
+TRAMPOLINE_ARTIFACTS_DIR = Path("artifacts") / "trampoline"
+TRAMPOLINE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+TRAMPOLINE_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+trampoline_analyses = {}
+trampoline_analyses_lock = threading.Lock()
 
 # Video upload limits
 MAX_VIDEO_SIZE_MB = 50  # Max 50MB video
@@ -479,6 +505,402 @@ def update_profile():
 def video_analysis():
     """Video analysis page"""
     return render_template('video_analysis.html')
+
+
+def get_trampoline_upload_dir() -> Path:
+    """Return the upload directory used by the trampoline demo."""
+
+    upload_dir = Path(app.config.get("TRAMPOLINE_UPLOAD_DIR", TRAMPOLINE_UPLOAD_DIR))
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
+
+
+def get_trampoline_artifacts_dir() -> Path:
+    """Return the artifacts directory used by the trampoline demo."""
+
+    artifacts_dir = Path(app.config.get("TRAMPOLINE_ARTIFACTS_DIR", TRAMPOLINE_ARTIFACTS_DIR))
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    return artifacts_dir
+
+
+def _load_timeline_payload(analysis_dir: Path) -> dict:
+    """Load automatic and merged jump timeline data for one analysis directory."""
+
+    segmentation = load_segmentation_payload(analysis_dir)
+    overrides = load_overrides_artifact(analysis_dir)
+    auto_segments = [
+        JumpSegment.model_validate(item)
+        for item in (segmentation or {}).get("jump_segments", [])
+    ]
+    merged_segments, manual_overrides = merge_segment_overrides(auto_segments, overrides)
+    return {
+        "segmentation": segmentation,
+        "jump_segments": [segment.model_dump(mode="json") for segment in merged_segments],
+        "manual_overrides": [override.model_dump(mode="json") for override in manual_overrides],
+    }
+
+
+def _build_trampoline_status_payload(analysis_id: str) -> dict:
+    """Return one app-facing status payload for a trampoline analysis."""
+
+    with trampoline_analyses_lock:
+        job = dict(trampoline_analyses.get(analysis_id, {}))
+
+    analysis_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+    result = None
+    if analysis_dir.is_dir():
+        try:
+            result = load_analysis_output(analysis_dir)
+        except FileNotFoundError:
+            result = None
+
+    status = job.get("status", "done" if result else "missing")
+    payload = {
+        "analysis_id": analysis_id,
+        "status": status,
+        "source_video": job.get("source_video") or (result["source_video"] if result else None),
+        "message": job.get("message", ""),
+        "error": job.get("error"),
+        "result": result,
+    }
+    return payload
+
+
+def _run_trampoline_analysis_job(analysis_id: str) -> None:
+    """Background worker for the Phase 1 trampoline analysis flow."""
+
+    with trampoline_analyses_lock:
+        job = trampoline_analyses.get(analysis_id)
+        if not job:
+            return
+        job["status"] = "running"
+        source_video = Path(job["source_video"])
+
+    output_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+
+    try:
+        analyze_video(
+            video_path=source_video,
+            output_dir=output_dir,
+            landmarks_only=True,
+            analysis_id=analysis_id,
+        )
+        result = load_analysis_output(output_dir)
+        with trampoline_analyses_lock:
+            job = trampoline_analyses.get(analysis_id, {})
+            job["status"] = "done"
+            job["message"] = "Analysis completed."
+            job["result"] = result
+    except Exception as exc:  # pragma: no cover - exercised via route tests
+        with trampoline_analyses_lock:
+            job = trampoline_analyses.get(analysis_id, {})
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["message"] = "Analysis failed."
+
+
+def _build_trampoline_bootstrap(analysis_id) -> dict:
+    """Assemble initial page state for `/trampoline`."""
+
+    artifacts_dir = get_trampoline_artifacts_dir()
+    analyses = list_analysis_outputs(artifacts_dir)
+    selected_analysis_id = analysis_id or (analyses[-1]["analysis_id"] if analyses else None)
+    selected_result = None
+    if selected_analysis_id:
+        status_payload = _build_trampoline_status_payload(selected_analysis_id)
+        selected_result = status_payload.get("result")
+
+    sample_video = Path("samples/tra_demo/sample01.mp4")
+    return {
+        "selected_analysis_id": selected_analysis_id,
+        "selected_result": selected_result,
+        "analyses": analyses,
+        "sample_video": str(sample_video),
+    }
+
+
+@app.route('/trampoline')
+def trampoline_demo():
+    """Single-person trampoline demo shell."""
+
+    analysis_id = request.args.get("analysis_id")
+    return render_template(
+        'trampoline.html',
+        bootstrap=_build_trampoline_bootstrap(analysis_id),
+    )
+
+
+@app.route('/api/trampoline/upload', methods=['POST'])
+def trampoline_upload_video():
+    """Upload one trampoline demo video and register an analysis id."""
+
+    if 'video' not in request.files:
+        return jsonify({'success': False, 'error': 'No video file provided'}), 400
+
+    video_file = request.files['video']
+    if video_file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    filename = secure_filename(video_file.filename)
+    suffix = Path(filename).suffix.lower() or ".mp4"
+    analysis_id = f"{Path(filename).stem or 'analysis'}-{uuid.uuid4().hex[:8]}"
+    upload_path = get_trampoline_upload_dir() / f"{analysis_id}{suffix}"
+    video_file.save(upload_path)
+
+    with trampoline_analyses_lock:
+        trampoline_analyses[analysis_id] = {
+            "status": "uploaded",
+            "source_video": str(upload_path),
+            "message": "Upload complete. Ready to analyze.",
+        }
+
+    return jsonify(
+        {
+            'success': True,
+            'analysis_id': analysis_id,
+            'status': 'uploaded',
+            'source_video': str(upload_path),
+        }
+    )
+
+
+@app.route('/api/trampoline/analyze', methods=['POST'])
+def trampoline_analyze_video():
+    """Queue one uploaded video for Phase 1 landmark extraction."""
+
+    payload = request.get_json(silent=True) or {}
+    analysis_id = payload.get("analysis_id")
+    if not analysis_id:
+        return jsonify({'success': False, 'error': 'analysis_id is required'}), 400
+
+    with trampoline_analyses_lock:
+        job = trampoline_analyses.get(analysis_id)
+        if not job:
+            return jsonify({'success': False, 'error': 'Unknown analysis_id'}), 404
+        if job.get("status") in {"queued", "running"}:
+            return jsonify({'success': True, 'analysis_id': analysis_id, 'status': job["status"]}), 202
+        job["status"] = "queued"
+        job["message"] = "Analysis queued."
+
+    worker = threading.Thread(target=_run_trampoline_analysis_job, args=(analysis_id,))
+    worker.daemon = True
+    worker.start()
+
+    return jsonify({'success': True, 'analysis_id': analysis_id, 'status': 'queued'}), 202
+
+
+@app.route('/api/trampoline/status/<analysis_id>')
+def trampoline_analysis_status(analysis_id: str):
+    """Report current job status and include result payload once available."""
+
+    payload = _build_trampoline_status_payload(analysis_id)
+    if payload["status"] == "missing":
+        return jsonify({'success': False, 'error': 'Analysis not found'}), 404
+    payload["success"] = True
+    return jsonify(payload)
+
+
+@app.route('/api/trampoline/result/<analysis_id>')
+def trampoline_analysis_result(analysis_id: str):
+    """Load one existing analysis result from disk."""
+
+    payload = _build_trampoline_status_payload(analysis_id)
+    if not payload.get("result"):
+        return jsonify({'success': False, 'error': 'Analysis result not found'}), 404
+    return jsonify({'success': True, **payload})
+
+
+@app.route('/api/trampoline/export/<analysis_id>')
+def trampoline_export_bundle(analysis_id: str):
+    """Create and download the Phase 4 export bundle for one analysis."""
+
+    analysis_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+    if not analysis_dir.is_dir():
+        return jsonify({'success': False, 'error': 'Analysis directory not found'}), 404
+
+    try:
+        exported = export_analysis_bundle(analysis_dir=analysis_dir)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+    return send_file(
+        Path(exported["bundle_zip"]),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{analysis_id}_analysis_bundle.zip",
+    )
+
+
+@app.route('/api/trampoline/calibration/<analysis_id>', methods=['GET', 'POST'])
+def trampoline_calibration(analysis_id: str):
+    """Persist or fetch bed calibration for one analysis directory."""
+
+    analysis_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+    if not analysis_dir.is_dir():
+        return jsonify({'success': False, 'error': 'Analysis directory not found'}), 404
+
+    if request.method == 'GET':
+        calibration = load_calibration(analysis_dir)
+        return jsonify(
+            {
+                'success': True,
+                'analysis_id': analysis_id,
+                'calibration': calibration.model_dump(mode="json") if calibration else None,
+            }
+        )
+
+    payload = request.get_json(silent=True) or {}
+    corners = payload.get("corners")
+    if not isinstance(corners, dict):
+        return jsonify({'success': False, 'error': 'corners must be provided'}), 400
+
+    frames_meta = load_analysis_output(analysis_dir)["frames_meta"]
+    calibration = create_bed_calibration(
+        corners=corners,
+        frame_width=int(frames_meta["width"]),
+        frame_height=int(frames_meta["height"]),
+    )
+    save_calibration(calibration, analysis_dir)
+    segmentation_payload = None
+    try:
+        segmentation_payload = segment_analysis_dir(analysis_dir)
+    except FileNotFoundError:
+        segmentation_payload = None
+
+    with trampoline_analyses_lock:
+        job = trampoline_analyses.setdefault(analysis_id, {})
+        job["result"] = load_analysis_output(analysis_dir)
+
+    return jsonify(
+        {
+            'success': True,
+            'analysis_id': analysis_id,
+            'calibration': calibration.model_dump(mode="json"),
+            'segmentation': segmentation_payload,
+        }
+    )
+
+
+@app.route('/api/trampoline/segment/<analysis_id>', methods=['POST'])
+def trampoline_segment_analysis(analysis_id: str):
+    """Generate automatic jump segmentation for one analysis directory."""
+
+    analysis_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+    if not analysis_dir.is_dir():
+        return jsonify({'success': False, 'error': 'Analysis directory not found'}), 404
+
+    try:
+        segmentation = segment_analysis_dir(analysis_dir)
+        result = load_analysis_output(analysis_dir)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+    return jsonify(
+        {
+            'success': True,
+            'analysis_id': analysis_id,
+            'segmentation': segmentation,
+            'result': result,
+        }
+    )
+
+
+@app.route('/api/trampoline/overrides/<analysis_id>', methods=['GET', 'POST'])
+def trampoline_timeline_overrides(analysis_id: str):
+    """Fetch or persist manual jump timeline overrides."""
+
+    analysis_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+    if not analysis_dir.is_dir():
+        return jsonify({'success': False, 'error': 'Analysis directory not found'}), 404
+
+    if request.method == 'GET':
+        timeline = _load_timeline_payload(analysis_dir)
+        return jsonify({'success': True, 'analysis_id': analysis_id, **timeline})
+
+    payload = request.get_json(silent=True) or {}
+    jump_rows = payload.get("jump_segments")
+    if not isinstance(jump_rows, list):
+        return jsonify({'success': False, 'error': 'jump_segments must be provided'}), 400
+
+    try:
+        jump_segments = [JumpSegment.model_validate(item) for item in jump_rows]
+        overrides = persist_timeline_overrides(analysis_dir, jump_segments)
+        result = load_analysis_output(analysis_dir)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+    with trampoline_analyses_lock:
+        job = trampoline_analyses.setdefault(analysis_id, {})
+        job["result"] = result
+
+    return jsonify(
+        {
+            'success': True,
+            'analysis_id': analysis_id,
+            'overrides': overrides.model_dump(mode="json"),
+            'result': result,
+        }
+    )
+
+
+@app.route('/api/trampoline/labels/<analysis_id>', methods=['POST'])
+def trampoline_label_overrides(analysis_id: str):
+    """Persist one manual label override for the selected jump."""
+
+    analysis_dir = resolve_analysis_dir(get_trampoline_artifacts_dir(), analysis_id)
+    if not analysis_dir.is_dir():
+        return jsonify({'success': False, 'error': 'Analysis directory not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    jump_id = payload.get("jump_id")
+    override_label = payload.get("override_label")
+    override_note = payload.get("override_note")
+    if not isinstance(jump_id, str) or not jump_id.strip():
+        return jsonify({'success': False, 'error': 'jump_id is required'}), 400
+    if override_label not in {None, "tuck", "pike", "straight"}:
+        return jsonify({'success': False, 'error': 'override_label must be tuck, pike, straight, or null'}), 400
+    if override_note is not None and not isinstance(override_note, str):
+        return jsonify({'success': False, 'error': 'override_note must be a string when provided'}), 400
+
+    try:
+        labels = persist_label_override(
+            analysis_dir,
+            jump_id=jump_id.strip(),
+            override_label=override_label,
+            override_note=(override_note or "").strip() or None,
+        )
+        result = load_analysis_output(analysis_dir)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+    with trampoline_analyses_lock:
+        job = trampoline_analyses.setdefault(analysis_id, {})
+        job["result"] = result
+
+    return jsonify(
+        {
+            'success': True,
+            'analysis_id': analysis_id,
+            'labels': labels.model_dump(mode="json"),
+            'result': result,
+        }
+    )
+
+
+@app.route('/api/trampoline/video/<analysis_id>')
+def trampoline_source_video(analysis_id: str):
+    """Serve the source video for one analysis."""
+
+    payload = _build_trampoline_status_payload(analysis_id)
+    source_video = payload.get("source_video")
+    if not source_video:
+        return jsonify({'success': False, 'error': 'Video not found'}), 404
+    video_path = resolve_repo_path(source_video)
+    if not video_path.is_file():
+        video_path = Path(source_video)
+    if not video_path.is_file():
+        return jsonify({'success': False, 'error': 'Video not found'}), 404
+    return send_file(video_path, mimetype="video/mp4")
 
 @app.route('/api/video/upload', methods=['POST'])
 def upload_video():
