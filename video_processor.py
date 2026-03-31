@@ -226,7 +226,7 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
 
     if is_trampoline:
         from trampoline.analyzer import TrampolineAnalyzer
-        from trampoline.overlay import draw_trampoline_overlay
+        from trampoline.overlay import draw_trampoline_overlay, draw_angle_arcs
     else:
         from exercises.engine import ExerciseEngine
 
@@ -389,6 +389,10 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
             if pose_results.pose_landmarks:
                 # Draw skeleton on frame
                 frame = draw_skeleton(frame, pose_results.pose_landmarks, mp_pose, mp_drawing)
+
+                # Draw angle arcs on skeleton (trampoline mode)
+                if is_trampoline:
+                    draw_angle_arcs(frame, pose_results.pose_landmarks)
 
                 # Analyze periodically
                 if frame_count % analyze_skip == 0:

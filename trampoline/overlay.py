@@ -4,7 +4,9 @@ Replaces draw_stats_overlay() when in trampoline mode.
 All sizes scale proportionally to video dimensions.
 """
 
+import math
 import cv2
+from trampoline.config import LANDMARK
 
 
 # Action colors (BGR)
@@ -23,12 +25,6 @@ PHASE_COLORS = {
 
 # Reference resolution for scaling (720p)
 _REF_W = 640
-_REF_H = 480
-
-
-def _scale(value, frame_dim, ref_dim=_REF_W):
-    """Scale a pixel value proportionally to frame size."""
-    return max(1, int(value * frame_dim / ref_dim))
 
 
 def draw_trampoline_overlay(frame, stats):
@@ -37,10 +33,8 @@ def draw_trampoline_overlay(frame, stats):
     All dimensions scale with video resolution.
     """
     h, w = frame.shape[:2]
-    # Use the shorter edge as scaling reference for consistent appearance
     ref = min(w, h)
 
-    # Scaling helpers
     def sx(v):
         return max(1, int(v * ref / _REF_W))
 
@@ -49,7 +43,7 @@ def draw_trampoline_overlay(frame, stats):
 
     margin = sx(15)
     box_w = sx(340)
-    box_h = sx(200)
+    box_h = sx(170)
     padding = sx(14)
     accent_w = sx(5)
 
@@ -68,7 +62,7 @@ def draw_trampoline_overlay(frame, stats):
     thickness_sm = max(1, sx(1))
     thickness_lg = max(1, sx(2))
 
-    # --- JUMPS count (large) ---
+    # --- JUMPS count ---
     jump_count = stats.get("jump_count", stats.get("reps", 0))
     cv2.putText(frame, "JUMPS", (x, y_base - sx(8)),
                 font, font_scale(0.5), (150, 150, 150), thickness_sm, cv2.LINE_AA)
@@ -85,7 +79,7 @@ def draw_trampoline_overlay(frame, stats):
     cv2.putText(frame, phase.upper(), (phase_x + sx(22), y_base + sx(20)),
                 font, font_scale(0.6), phase_color, thickness_lg, cv2.LINE_AA)
 
-    # --- ACTION name (large, color-coded) ---
+    # --- ACTION name ---
     action = stats.get("current_action", "Unknown")
     action_y = y_base + sx(65)
     action_color = ACTION_COLORS.get(action, ACTION_COLORS["Unknown"])
@@ -94,23 +88,99 @@ def draw_trampoline_overlay(frame, stats):
     cv2.putText(frame, action.upper(), (x, action_y + sx(28)),
                 font_bold, font_scale(1.2), action_color, thickness_lg, cv2.LINE_AA)
 
-    # --- Angle debug info (small) ---
-    angle_y = action_y + sx(55)
-    trunk_thigh = stats.get("trunk_thigh_angle", 0)
-    thigh_shin = stats.get("thigh_shin_angle", 0)
-    if trunk_thigh > 0:
-        cv2.putText(frame, f"T-T: {trunk_thigh:.0f}deg  T-S: {thigh_shin:.0f}deg",
-                    (x, angle_y), font, font_scale(0.4), (180, 180, 180), thickness_sm, cv2.LINE_AA)
-
-    # --- Velocity bar on right edge ---
+    # --- Velocity bar ---
     velocity = stats.get("velocity", 0)
     _draw_velocity_bar(frame, velocity, w, h, ref)
 
     return frame
 
 
+def draw_angle_arcs(frame, landmarks):
+    """
+    Draw angle arcs at hip (trunk-thigh) and knee (thigh-shin) joints
+    directly on the skeleton, with angle value labels.
+
+    Args:
+        frame: BGR numpy array
+        landmarks: MediaPipe pose landmarks object (with .landmark list)
+    """
+    h, w = frame.shape[:2]
+    ref = min(w, h)
+    arc_radius = max(15, int(30 * ref / _REF_W))
+    font_sc = max(0.3, 0.45 * ref / _REF_W)
+    thickness = max(1, int(2 * ref / _REF_W))
+
+    lm = landmarks.landmark
+
+    def get_px(idx):
+        return (int(lm[idx].x * w), int(lm[idx].y * h))
+
+    def is_vis(idx):
+        return lm[idx].visibility > 0.4
+
+    # Joints to annotate: (label_prefix, point_a_idx, vertex_idx, point_c_idx)
+    joints = [
+        # Trunk-thigh at hip
+        ("left_hip",  LANDMARK["left_shoulder"],  LANDMARK["left_hip"],   LANDMARK["left_knee"]),
+        ("right_hip", LANDMARK["right_shoulder"], LANDMARK["right_hip"],  LANDMARK["right_knee"]),
+        # Thigh-shin at knee
+        ("left_knee",  LANDMARK["left_hip"],  LANDMARK["left_knee"],  LANDMARK["left_ankle"]),
+        ("right_knee", LANDMARK["right_hip"], LANDMARK["right_knee"], LANDMARK["right_ankle"]),
+    ]
+
+    for _, a_idx, v_idx, c_idx in joints:
+        if not (is_vis(a_idx) and is_vis(v_idx) and is_vis(c_idx)):
+            continue
+
+        pa = get_px(a_idx)
+        pv = get_px(v_idx)
+        pc = get_px(c_idx)
+
+        # Compute angle at vertex
+        va = [pa[0] - pv[0], pa[1] - pv[1]]
+        vc = [pc[0] - pv[0], pc[1] - pv[1]]
+        dot = va[0] * vc[0] + va[1] * vc[1]
+        mag_a = math.sqrt(va[0]**2 + va[1]**2)
+        mag_c = math.sqrt(vc[0]**2 + vc[1]**2)
+        if mag_a * mag_c == 0:
+            continue
+        cos_val = max(-1.0, min(1.0, dot / (mag_a * mag_c)))
+        angle_deg = math.degrees(math.acos(cos_val))
+
+        # Compute arc start/end angles for cv2.ellipse (0=right, counter-clockwise)
+        angle_a = math.degrees(math.atan2(-va[1], va[0]))  # negative y because image coords
+        angle_c = math.degrees(math.atan2(-vc[1], vc[0]))
+
+        # Ensure we draw the smaller arc
+        start = angle_a
+        end = angle_c
+        diff = (end - start) % 360
+        if diff > 180:
+            start, end = end, start
+
+        # Color based on angle
+        if angle_deg > 135:
+            color = (0, 200, 100)    # green
+        elif angle_deg > 90:
+            color = (0, 180, 255)    # orange
+        else:
+            color = (60, 76, 231)    # red
+
+        # Draw arc
+        cv2.ellipse(frame, pv, (arc_radius, arc_radius), 0, -start, -end,
+                     color, thickness, cv2.LINE_AA)
+
+        # Place angle text at midpoint of arc
+        mid_angle_rad = math.radians((start + end) / 2)
+        text_r = arc_radius + max(8, int(12 * ref / _REF_W))
+        text_x = int(pv[0] + text_r * math.cos(mid_angle_rad))
+        text_y = int(pv[1] - text_r * math.sin(mid_angle_rad))
+        cv2.putText(frame, f"{angle_deg:.0f}", (text_x, text_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_sc, color, thickness, cv2.LINE_AA)
+
+
 def _draw_velocity_bar(frame, velocity, w, h, ref):
-    """Draw a vertical velocity indicator bar on the right edge, scaled to resolution."""
+    """Draw a vertical velocity indicator bar on the right edge."""
     def sx(v):
         return max(1, int(v * ref / _REF_W))
 
@@ -120,7 +190,6 @@ def _draw_velocity_bar(frame, velocity, w, h, ref):
     bar_x = w - bar_w - bar_margin
     bar_y_center = sx(80)
 
-    # Background
     overlay = frame.copy()
     cv2.rectangle(overlay,
                   (bar_x, bar_y_center - bar_h // 2),
@@ -128,25 +197,21 @@ def _draw_velocity_bar(frame, velocity, w, h, ref):
                   (50, 50, 50), -1)
     cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
-    # Center line
     cv2.line(frame,
              (bar_x, bar_y_center),
              (bar_x + bar_w, bar_y_center),
              (200, 200, 200), max(1, sx(1)))
 
-    # Velocity fill (clamped to bar range)
-    max_vel = 0.02
+    max_vel = 0.5  # time-normalized velocity range
     fill_ratio = max(-1.0, min(1.0, velocity / max_vel))
     fill_pixels = int(fill_ratio * (bar_h // 2))
 
     if fill_pixels > 0:
-        # Descending — red
         cv2.rectangle(frame,
                       (bar_x + 1, bar_y_center),
                       (bar_x + bar_w - 1, bar_y_center + fill_pixels),
                       (60, 76, 231), -1)
     elif fill_pixels < 0:
-        # Ascending — green
         cv2.rectangle(frame,
                       (bar_x + 1, bar_y_center + fill_pixels),
                       (bar_x + bar_w - 1, bar_y_center),
