@@ -603,6 +603,7 @@
 .action-name.action-tuck { color: #ffeb3b !important; }
 .action-name.action-pike { color: #ff9800 !important; }
 .action-name.action-straight { color: #ffffff !important; }
+.action-name.action-straddle { color: #e040fb !important; }
 .action-name.action-unknown { color: rgba(255,255,255,0.5) !important; }
 
 /* Trampoline description */

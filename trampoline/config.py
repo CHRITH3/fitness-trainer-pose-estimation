@@ -33,5 +33,10 @@ THIGH_SHIN_EXIT = 138.0           # degrees: exit back to pike
 STRAIGHT_THRESHOLD = 135.0        # primary boundary (reference)
 UNKNOWN_FALLBACK_FRAMES = 6       # consecutive invalid frames before Unknown
 
+# --- Straddle Detection ---
+STRADDLE_LEG_SPREAD_ENTER = 1.8   # ankle_dist/hip_width ratio to enter straddle
+STRADDLE_LEG_SPREAD_EXIT = 1.4    # ratio to exit straddle (hysteresis)
+TOGETHER_THRESHOLD = 1.2          # legs considered "together" below this ratio
+
 # --- Intermediate Bounce Detection ---
 INTERMEDIATE_MAX_FLIGHT_FRAMES = 6

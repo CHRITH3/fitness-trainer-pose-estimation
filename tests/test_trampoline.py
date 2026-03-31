@@ -269,6 +269,49 @@ class TestActionClassifier:
         ac.set_phase("contact")
         assert ac.state == ActionState.UNKNOWN
 
+    def test_straddle_classification(self):
+        """With legs spread wide, should classify as Straddle."""
+        ac = ActionClassifier()
+        ac.set_phase("flight")
+
+        landmarks = [make_landmark(0.5, 0.5) for _ in range(33)]
+        # Straight body but legs spread wide
+        landmarks[11] = make_landmark(0.5, 0.2)   # left shoulder
+        landmarks[12] = make_landmark(0.5, 0.2)   # right shoulder
+        landmarks[23] = make_landmark(0.48, 0.4)  # left hip
+        landmarks[24] = make_landmark(0.52, 0.4)  # right hip
+        landmarks[25] = make_landmark(0.5, 0.6)   # left knee
+        landmarks[26] = make_landmark(0.5, 0.6)   # right knee
+        # Ankles spread very wide (much wider than hip width)
+        landmarks[27] = make_landmark(0.2, 0.8)   # left ankle — far left
+        landmarks[28] = make_landmark(0.8, 0.8)   # right ankle — far right
+
+        result = ac.classify_frame(landmarks, (480, 640))
+        assert result == ActionState.STRADDLE
+
+    def test_straddle_hysteresis(self):
+        """Once in straddle, shouldn't exit until legs come together past exit threshold."""
+        ac = ActionClassifier()
+        ac.set_phase("flight")
+
+        # Enter straddle
+        straddle_lm = [make_landmark(0.5, 0.5) for _ in range(33)]
+        straddle_lm[11] = make_landmark(0.5, 0.2)
+        straddle_lm[12] = make_landmark(0.5, 0.2)
+        straddle_lm[23] = make_landmark(0.48, 0.4)
+        straddle_lm[24] = make_landmark(0.52, 0.4)
+        straddle_lm[25] = make_landmark(0.5, 0.6)
+        straddle_lm[26] = make_landmark(0.5, 0.6)
+        straddle_lm[27] = make_landmark(0.2, 0.8)
+        straddle_lm[28] = make_landmark(0.8, 0.8)
+
+        ac.classify_frame(straddle_lm, (480, 640))
+        assert ac.state == ActionState.STRADDLE
+
+        # Still straddle (same landmarks)
+        result = ac.classify_frame(straddle_lm, (480, 640))
+        assert result == ActionState.STRADDLE
+
 
 class TestTrampolineAnalyzer:
     def test_initial_state(self):

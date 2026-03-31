@@ -14,6 +14,7 @@ ACTION_COLORS = {
     "Straight": (0, 230, 118),     # green
     "Pike":     (255, 180, 0),     # blue-ish
     "Tuck":     (0, 200, 255),     # orange-ish
+    "Straddle": (255, 100, 255),   # magenta
     "Unknown":  (140, 140, 140),   # gray
 }
 
