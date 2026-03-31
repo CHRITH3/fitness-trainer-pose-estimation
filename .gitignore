@@ -26,3 +26,7 @@ Thumbs.db
 output/
 data/*.db
 *.sqlite3
+
+# Uploaded files
+uploads/*
+!uploads/.gitkeep
