@@ -97,64 +97,69 @@ class TestJumpDetector:
         assert jd.phase == "contact"
 
     def test_full_jump_cycle(self):
-        """Simulate a complete: contact → takeoff → flight → landing cycle.
+        """Simulate: contact → takeoff → flight → landing → contact.
 
-        Velocity profile (y-down coords):
-          contact (~0) → takeoff (v goes negative) → peak (v=0) → descend (v positive)
-          → landing (v crosses from positive to ≤0) → contact
+        Velocity extremum detection:
+          - Takeoff = ascending velocity peak (most negative smoothed velocity)
+          - Landing = descending velocity peak (most positive smoothed velocity)
         """
         jd = JumpDetector(fps=30.0)
         frame = 0
 
-        # Phase 1: Start on trampoline (contact) — establish baseline
-        for i in range(15):
-            frame += 1
-            com_y = 0.6 + i * 0.001  # nearly static on bed
-            ankle_y = 0.8 + i * 0.0005
-            landmarks = make_landmarks_at_y(com_y, ankle_y)
-            jd.process_frame(landmarks, frame)
-
-        # Phase 2: Takeoff — rapid upward movement (velocity goes negative)
-        for i in range(15):
-            frame += 1
-            com_y = 0.615 - i * 0.01  # rapid ascent (y decreasing)
-            ankle_y = 0.808 - i * 0.008
-            landmarks = make_landmarks_at_y(com_y, ankle_y)
-            jd.process_frame(landmarks, frame)
-
-        # Should be in flight by now
-        assert jd.phase == "flight"
-
-        # Phase 3: Peak — velocity crosses from negative to positive
-        for i in range(5):
-            frame += 1
-            com_y = 0.465 + i * 0.002  # near peak, slight descent
-            ankle_y = 0.688 + i * 0.002
-            landmarks = make_landmarks_at_y(com_y, ankle_y)
-            jd.process_frame(landmarks, frame)
-
-        # Should still be in flight (this is the peak, not landing)
-        assert jd.phase == "flight"
-
-        # Phase 4: Descent — velocity positive (y increasing toward bed)
-        for i in range(15):
-            frame += 1
-            com_y = 0.475 + i * 0.01  # descending back to bed
-            ankle_y = 0.698 + i * 0.008
-            landmarks = make_landmarks_at_y(com_y, ankle_y)
-            jd.process_frame(landmarks, frame)
-
-        # Phase 5: Landing reversal — velocity crosses from positive to ≤0
-        # (bed absorbs and reverses motion)
+        # Phase 1: Static on bed (contact)
         for i in range(10):
             frame += 1
-            com_y = 0.625 - i * 0.003  # bed pushes back (y starts decreasing)
-            ankle_y = 0.818 - i * 0.002
-            landmarks = make_landmarks_at_y(com_y, ankle_y)
-            jd.process_frame(landmarks, frame)
+            com_y = 0.6
+            ankle_y = 0.8
+            jd.process_frame(make_landmarks_at_y(com_y, ankle_y), frame)
 
-        # Should have detected landing and counted a jump
-        assert jd.jump_count >= 1
+        # Phase 2: Accelerating upward (velocity increasingly negative)
+        for i in range(8):
+            frame += 1
+            speed = (i + 1) * 0.005  # accelerating
+            com_y = 0.6 - sum(range(1, i + 2)) * 0.005
+            ankle_y = com_y + 0.2
+            jd.process_frame(make_landmarks_at_y(com_y, ankle_y), frame)
+
+        # Phase 3: Decelerating upward (velocity still negative but decreasing magnitude)
+        # This is where takeoff should be detected (ascending velocity peak)
+        for i in range(8):
+            frame += 1
+            speed = 0.04 - (i + 1) * 0.004  # decelerating
+            com_y -= max(0.001, speed)
+            ankle_y = com_y + 0.2
+            jd.process_frame(make_landmarks_at_y(com_y, ankle_y), frame)
+
+        # Should be in flight after takeoff
+        assert jd.phase == "flight", f"Expected flight, got {jd.phase}"
+
+        # Phase 4: Peak and descent — velocity goes from ~0 to positive (accelerating down)
+        peak_com_y = com_y
+        for i in range(10):
+            frame += 1
+            speed = (i + 1) * 0.004  # accelerating downward
+            com_y = peak_com_y + sum(range(1, i + 2)) * 0.004
+            ankle_y = com_y + 0.2
+            jd.process_frame(make_landmarks_at_y(com_y, ankle_y), frame)
+
+        # Phase 5: Decelerating descent (velocity positive but decreasing)
+        # This is where landing should be detected (descending velocity peak)
+        for i in range(8):
+            frame += 1
+            speed = 0.04 - (i + 1) * 0.004
+            com_y += max(0.001, speed)
+            ankle_y = com_y + 0.2
+            jd.process_frame(make_landmarks_at_y(com_y, ankle_y), frame)
+
+        # Phase 6: Bed reversal — velocity goes negative again
+        for i in range(5):
+            frame += 1
+            com_y -= (i + 1) * 0.003
+            ankle_y = com_y + 0.2
+            jd.process_frame(make_landmarks_at_y(com_y, ankle_y), frame)
+
+        # Should have detected landing
+        assert jd.jump_count >= 1, f"Expected >=1 jump, got {jd.jump_count}"
 
     def test_missing_landmarks_handled(self):
         """Landmarks with low visibility should not crash."""

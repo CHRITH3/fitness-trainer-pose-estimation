@@ -94,10 +94,14 @@ class ActionClassifier:
         return new_state
 
     def get_jump_action(self) -> ActionState:
-        """Determine dominant action for current jump via majority vote (ignoring UNKNOWN)."""
+        """Determine dominant action via majority vote on mid-flight 60% frames."""
         valid = [s for s in self._per_jump_classifications if s != ActionState.UNKNOWN]
         if not valid:
             return ActionState.UNKNOWN
+        n = len(valid)
+        trim = n // 5  # 20% from each end
+        if trim > 0 and n > 4:
+            valid = valid[trim : n - trim]
         counts = Counter(valid)
         return counts.most_common(1)[0][0]
 
