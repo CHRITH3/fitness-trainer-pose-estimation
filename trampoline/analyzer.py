@@ -85,3 +85,7 @@ class TrampolineAnalyzer:
             "current_action": self._current_action.value,
             "completed_jumps": self.completed_jumps,
         }
+
+    def dump_diagnostics(self, path: str):
+        """Write jump detection diagnostics CSV."""
+        self.jump_detector.dump_diagnostics(path)

@@ -19,6 +19,7 @@ LANDMARK = {
 
 # --- Jump Detection ---
 VELOCITY_WINDOW = 5               # frames for finite-difference velocity
+VELOCITY_SMOOTH_WINDOW = 3        # frames for velocity moving average smoothing
 LANDING_VEL_THRESHOLD = 0.01      # y-velocity reversal threshold (positive = descending)
 TAKEOFF_VEL_THRESHOLD = -0.01     # negative = ascending
 MIN_JUMP_FRAMES = 8               # minimum frames between two landings

@@ -481,6 +481,9 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         if is_trampoline:
             results['current_action'] = current_stats.get('current_action', '--')
             results['completed_jumps'] = analyzer.completed_jumps
+            # Write diagnostic CSV for jump detection analysis
+            diag_path = output_json_path.rsplit('.', 1)[0] + '_diagnostics.csv'
+            analyzer.dump_diagnostics(diag_path)
         
         # Close video writers
         if imageio_writer:
