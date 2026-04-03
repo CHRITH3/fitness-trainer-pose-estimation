@@ -142,7 +142,7 @@ def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generato
     """Stream LLM analysis chunks. Yields text strings.
 
     Reads config from environment:
-      QWEN_API_KEY (required)
+      QWEN_API_KEY / DASHSCOPE_API_KEY (required)
       QWEN_BASE_URL (default: https://dashscope.aliyuncs.com/compatible-mode/v1)
       QWEN_MODEL (default: qwen-plus)
     """
@@ -154,7 +154,7 @@ def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generato
 
     api_key = resolve_api_key()
     base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    model = os.environ.get("QWEN_MODEL", "qwen-plus")
+    model = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
 
     if not api_key:
         yield "\n\n[ERROR] 未配置 QWEN_API_KEY 或 DASHSCOPE_API_KEY 环境变量"
