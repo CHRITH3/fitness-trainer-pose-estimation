@@ -5,7 +5,7 @@ Tests for LLM service: report building, prompt generation, response segmentation
 import pytest
 from trampoline.llm_service import (
     AnalysisReport, build_prompt, clean_chunk, segment_response,
-    get_cached, set_cached, _llm_cache,
+    get_cached, set_cached, resolve_api_key, _llm_cache,
 )
 
 
@@ -141,6 +141,23 @@ class TestCache:
 
     def test_miss_returns_none(self):
         assert get_cached('nonexistent') is None
+
+
+class TestApiKeyResolution:
+    def test_prefers_qwen_api_key(self, monkeypatch):
+        monkeypatch.setenv('QWEN_API_KEY', 'qwen-key')
+        monkeypatch.setenv('DASHSCOPE_API_KEY', 'dashscope-key')
+        assert resolve_api_key() == 'qwen-key'
+
+    def test_falls_back_to_dashscope_api_key(self, monkeypatch):
+        monkeypatch.delenv('QWEN_API_KEY', raising=False)
+        monkeypatch.setenv('DASHSCOPE_API_KEY', 'dashscope-key')
+        assert resolve_api_key() == 'dashscope-key'
+
+    def test_returns_empty_string_when_no_key_present(self, monkeypatch):
+        monkeypatch.delenv('QWEN_API_KEY', raising=False)
+        monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
+        assert resolve_api_key() == ''
 
 
 if __name__ == "__main__":

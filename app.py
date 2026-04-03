@@ -771,31 +771,42 @@ def get_video_status(video_id):
 @app.route('/api/video/llm_analysis/<video_id>', methods=['GET'])
 def llm_analysis(video_id):
     """Stream LLM analysis of trampoline video results via SSE."""
+    import json as _json
+
+    def sse_message(payload):
+        def generate_once():
+            yield f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        return Response(
+            generate_once(),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+        )
+
     analysis = video_analyses.get(video_id)
 
     if not analysis:
-        return jsonify({'error': 'Video ID not found'}), 404
+        return sse_message({'type': 'error', 'message': 'Video ID not found'})
     if analysis.get('mode') != 'trampoline':
-        return jsonify({'error': 'LLM analysis only available for trampoline mode'}), 400
+        return sse_message({'type': 'error', 'message': 'LLM analysis only available for trampoline mode'})
     if analysis.get('status') != 'completed':
-        return jsonify({'error': 'Video analysis not yet complete'}), 400
+        return sse_message({'type': 'error', 'message': 'Video analysis not yet complete'})
 
     try:
         from trampoline.llm_service import (
             AnalysisReport, stream_llm_analysis, clean_chunk,
-            segment_response, get_cached, set_cached,
+            segment_response, get_cached, set_cached, resolve_api_key,
         )
     except ImportError as e:
-        return jsonify({'error': f'LLM service not available: {e}'}), 503
+        return sse_message({'type': 'error', 'message': f'LLM service not available: {e}'})
 
-    api_key = os.environ.get('QWEN_API_KEY', '')
+    api_key = resolve_api_key()
     if not api_key:
-        return jsonify({'error': 'QWEN_API_KEY not configured'}), 503
+        return sse_message({'type': 'error', 'message': 'QWEN_API_KEY or DASHSCOPE_API_KEY not configured'})
 
     # Check cache
     cached = get_cached(video_id)
     if cached:
-        import json as _json
         def cached_gen():
             yield f"data: {_json.dumps({'type': 'done', 'sections': cached['sections'], 'full_text': cached['full_text']}, ensure_ascii=False)}\n\n"
         return Response(cached_gen(), mimetype='text/event-stream',
@@ -804,7 +815,6 @@ def llm_analysis(video_id):
     report = AnalysisReport.from_video_analysis(analysis)
 
     def generate():
-        import json as _json
         full_text = ""
         prev_chunk = ""
 

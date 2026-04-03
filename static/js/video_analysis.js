@@ -730,6 +730,10 @@ document.addEventListener('DOMContentLoaded', function() {
         llmBtn.addEventListener('click', () => {
             if (!currentVideoId) return;
             llmBtn.disabled = true;
+            if (llmEventSource) {
+                llmEventSource.close();
+                llmEventSource = null;
+            }
 
             // Show streaming state
             llmStreaming.classList.remove('hidden');
@@ -739,6 +743,7 @@ document.addEventListener('DOMContentLoaded', function() {
             llmCards.classList.remove('visible');
             llmToggleRaw.classList.add('hidden');
 
+            let llmStreamFinished = false;
             llmEventSource = new EventSource(`/api/video/llm_analysis/${currentVideoId}`);
 
             llmEventSource.onmessage = function(e) {
@@ -750,6 +755,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     llmStreamingText.scrollTop = llmStreamingText.scrollHeight;
                 }
                 else if (data.type === 'done') {
+                    llmStreamFinished = true;
                     llmEventSource.close();
                     llmEventSource = null;
 
@@ -778,6 +784,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     llmBtn.disabled = false;
                 }
                 else if (data.type === 'error') {
+                    llmStreamFinished = true;
                     llmEventSource.close();
                     llmEventSource = null;
                     llmStreamingText.innerHTML += `<br><span style="color:#e74c3c">${data.message}</span>`;
@@ -786,6 +793,9 @@ document.addEventListener('DOMContentLoaded', function() {
             };
 
             llmEventSource.onerror = function() {
+                if (llmStreamFinished) {
+                    return;
+                }
                 llmEventSource.close();
                 llmEventSource = null;
                 llmStreamingText.innerHTML += '<br><span style="color:#e74c3c">连接中断</span>';

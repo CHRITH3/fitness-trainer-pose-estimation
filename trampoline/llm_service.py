@@ -130,6 +130,14 @@ def build_prompt(report: AnalysisReport) -> list:
 
 # ── C. LLM Streaming Client ───────────────────────────────────────
 
+def resolve_api_key() -> str:
+    """Resolve the DashScope/Qwen API key from supported environment variables."""
+    return (
+        os.environ.get("QWEN_API_KEY")
+        or os.environ.get("DASHSCOPE_API_KEY")
+        or ""
+    )
+
 def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generator[str, None, None]:
     """Stream LLM analysis chunks. Yields text strings.
 
@@ -144,12 +152,12 @@ def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generato
         yield "\n\n[ERROR] openai 库未安装，请运行 pip install openai"
         return
 
-    api_key = os.environ.get("QWEN_API_KEY", "")
+    api_key = resolve_api_key()
     base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     model = os.environ.get("QWEN_MODEL", "qwen-plus")
 
     if not api_key:
-        yield "\n\n[ERROR] 未配置 QWEN_API_KEY 环境变量"
+        yield "\n\n[ERROR] 未配置 QWEN_API_KEY 或 DASHSCOPE_API_KEY 环境变量"
         return
 
     messages = build_prompt(report)
