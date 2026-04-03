@@ -71,3 +71,13 @@ Each exercise YAML defines: `angles` (body points to track), `states` (FSM condi
 - Camera and PoseEstimator are lazily initialized to reduce memory usage
 - Frame processing uses a global `lock` for thread safety in the MJPEG stream
 - `db/workout_logger.py` is currently a stub
+
+## Workflow Conventions
+
+- **Git 提交**：每完成一项任务立即提交一个 git commit，commit message 使用简略中文描述
+- **任务文档**：每项任务完成后在 `trampoline/docs/` 目录下生成一份详细的任务执行说明文档，命名规则为 `YYYY-MM-DD-≤10字中文任务简介.md`
+- **CLAUDE.md 同步**：当发生以下变更时，主动提醒用户是否需要更新 CLAUDE.md：
+  - 新增或删除核心模块/组件
+  - 技术栈变化（换框架、升级有 breaking change 的依赖）
+  - 构建/测试/运行命令改变
+  - 重要的架构模式变化
