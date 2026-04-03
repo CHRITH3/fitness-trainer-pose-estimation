@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AI-powered fitness trainer web app that uses MediaPipe pose estimation for real-time exercise tracking with form scoring. Also includes a trampoline analysis module for jump detection and action classification.
 
-**Tech stack:** Python/Flask backend, vanilla HTML/CSS/JS frontend, MediaPipe 0.10.9 for pose estimation, OpenCV for video processing, imageio-ffmpeg for H.264 encoding.
+**Tech stack:** Python/Flask backend, vanilla HTML/CSS/JS frontend, MediaPipe 0.10.9 for pose estimation, OpenCV for video processing, imageio-ffmpeg for H.264 encoding, openai SDK for Qianwen LLM integration (OpenAI-compatible API, config via `QWEN_API_KEY`/`QWEN_BASE_URL`/`QWEN_MODEL` env vars).
 
 ## Commands
 
@@ -48,9 +48,11 @@ Score 0-100 composed of: angle accuracy (40%), tempo compliance (30%), form feed
 ### Trampoline Module
 
 - **`trampoline/analyzer.py`** — Orchestrator, drop-in replacement for ExerciseEngine with same `process_frame()` interface
-- **`trampoline/jump_detector.py`** — Detects takeoff/landing events from center-of-mass Y position
-- **`trampoline/action_classifier.py`** — Classifies jump actions using trunk-thigh and thigh-shin angles
+- **`trampoline/jump_detector.py`** — Detects takeoff/landing events via velocity extremum detection
+- **`trampoline/action_classifier.py`** — Classifies jump actions (Straight/Pike/Tuck/Straddle) using trunk-thigh, thigh-shin angles and leg spread ratio, with hysteresis
 - **`trampoline/config.py`** — Thresholds and constants
+- **`trampoline/overlay.py`** — Video overlay drawing (stats panel, angle arcs, velocity bar), auto-scales with resolution
+- **`trampoline/llm_service.py`** — LLM integration: builds AnalysisReport from analysis results, constructs prompt, streams Qianwen responses via OpenAI-compatible API, cleans/segments output into structured sections
 
 ### Web App Flow
 
