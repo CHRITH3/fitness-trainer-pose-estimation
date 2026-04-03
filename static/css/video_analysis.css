@@ -618,3 +618,132 @@
     font-size: 0.75rem;
     opacity: 0.7;
 }
+
+/* ==================== LLM Analysis Section ==================== */
+
+.llm-section h2 {
+    border-bottom-color: #11998e;
+}
+
+#llm-btn {
+    width: 100%;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #11998e, #38ef7d);
+    border: none;
+    color: white;
+}
+
+#llm-btn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* Streaming text area */
+.llm-streaming {
+    margin-top: 10px;
+}
+
+.llm-streaming-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: #00d4aa;
+}
+
+.llm-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00d4aa;
+    animation: llm-pulse 1.2s infinite;
+}
+
+@keyframes llm-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.llm-streaming-text {
+    background: linear-gradient(145deg, #1a1a2e, #16213e);
+    color: #e0e0e0;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    max-height: 350px;
+    overflow-y: auto;
+    transition: max-height 0.5s ease, opacity 0.3s ease;
+}
+
+.llm-streaming-text::-webkit-scrollbar { width: 5px; }
+.llm-streaming-text::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+.llm-streaming-text::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+
+.llm-streaming.collapsed .llm-streaming-text {
+    max-height: 0;
+    opacity: 0;
+    padding: 0 14px;
+    overflow: hidden;
+}
+
+.llm-streaming.collapsed .llm-streaming-header {
+    display: none;
+}
+
+/* Cards */
+.llm-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+}
+
+.llm-cards.visible {
+    opacity: 1;
+}
+
+.llm-card {
+    background: white;
+    border-radius: 8px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    border-left: 4px solid #ccc;
+}
+
+.llm-card h3 {
+    font-size: 0.9rem;
+    margin: 0 0 8px 0;
+    color: #333;
+}
+
+.llm-card-body {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #555;
+}
+
+#llm-card-overview { border-left-color: #27ae60; }
+#llm-card-issues   { border-left-color: #e67e22; }
+#llm-card-details  { border-left-color: #8e44ad; }
+#llm-card-suggestions { border-left-color: #3498db; }
+
+/* Toggle raw text button */
+.llm-toggle-raw {
+    margin-top: 8px;
+    background: none;
+    border: 1px solid #ddd;
+    color: #888;
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.llm-toggle-raw:hover {
+    color: #333;
+    border-color: #999;
+}

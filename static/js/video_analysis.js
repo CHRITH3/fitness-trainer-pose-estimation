@@ -46,11 +46,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const actionCard = document.getElementById('action-card');
     const statAction = document.getElementById('stat-action');
 
+    // LLM Elements
+    const llmSection = document.getElementById('llm-section');
+    const llmBtn = document.getElementById('llm-btn');
+    const llmStreaming = document.getElementById('llm-streaming');
+    const llmStreamingText = document.getElementById('llm-streaming-text');
+    const llmCards = document.getElementById('llm-cards');
+    const llmToggleRaw = document.getElementById('llm-toggle-raw');
+
     // State
     let videoFile = null;
     let isAnalyzing = false;
     let analysisInterval = null;
     let exercisesData = {};
+    let currentVideoId = null;  // module-level for LLM access
+    let llmEventSource = null;
     let analysisResults = {
         reps: 0,
         scores: [],
@@ -252,6 +262,15 @@ document.addEventListener('DOMContentLoaded', function() {
         resetStats();
         reportSection.classList.add('hidden');
         feedbackLog.innerHTML = '<div class="feedback-item info"><span class="feedback-time">--:--</span><span class="feedback-text">Upload a video and start analysis to see feedback</span></div>';
+        // Reset LLM
+        if (llmEventSource) { llmEventSource.close(); llmEventSource = null; }
+        currentVideoId = null;
+        if (llmSection) llmSection.classList.add('hidden');
+        if (llmStreaming) llmStreaming.classList.add('hidden');
+        if (llmCards) { llmCards.classList.add('hidden'); llmCards.classList.remove('visible'); }
+        if (llmStreamingText) llmStreamingText.innerHTML = '';
+        if (llmToggleRaw) llmToggleRaw.classList.add('hidden');
+        if (llmBtn) llmBtn.disabled = true;
     });
 
     // Start Analysis
@@ -326,6 +345,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let lastProgress = 0;
 
     function startAnalysisPolling(videoId) {
+        currentVideoId = videoId;
         // Setup canvas
         analysisCanvas.width = videoPlayer.videoWidth || 640;
         analysisCanvas.height = videoPlayer.videoHeight || 480;
@@ -690,9 +710,105 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
 
         reportSection.classList.remove('hidden');
+
+        // Enable LLM analysis button
+        if (llmSection) llmSection.classList.remove('hidden');
+        if (llmBtn) llmBtn.disabled = false;
     }
 
-    // Download report
+    // ==================== LLM Analysis ====================
+
+    function simpleMd(text) {
+        // Minimal markdown: **bold**, \n→<br>, ## heading
+        return text
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/^## (.+)$/gm, '<div style="font-weight:700;color:#00d4aa;margin:8px 0 4px">$1</div>')
+            .replace(/\n/g, '<br>');
+    }
+
+    if (llmBtn) {
+        llmBtn.addEventListener('click', () => {
+            if (!currentVideoId) return;
+            llmBtn.disabled = true;
+
+            // Show streaming state
+            llmStreaming.classList.remove('hidden');
+            llmStreaming.classList.remove('collapsed');
+            llmStreamingText.innerHTML = '';
+            llmCards.classList.add('hidden');
+            llmCards.classList.remove('visible');
+            llmToggleRaw.classList.add('hidden');
+
+            llmEventSource = new EventSource(`/api/video/llm_analysis/${currentVideoId}`);
+
+            llmEventSource.onmessage = function(e) {
+                let data;
+                try { data = JSON.parse(e.data); } catch { return; }
+
+                if (data.type === 'chunk') {
+                    llmStreamingText.innerHTML += simpleMd(data.text);
+                    llmStreamingText.scrollTop = llmStreamingText.scrollHeight;
+                }
+                else if (data.type === 'done') {
+                    llmEventSource.close();
+                    llmEventSource = null;
+
+                    // Populate cards
+                    const sectionMap = {
+                        '整体表现': 'llm-card-overview',
+                        '主要问题': 'llm-card-issues',
+                        '逐跳点评': 'llm-card-details',
+                        '改进建议': 'llm-card-suggestions',
+                    };
+                    for (const [heading, cardId] of Object.entries(sectionMap)) {
+                        const card = document.getElementById(cardId);
+                        if (card) {
+                            const body = card.querySelector('.llm-card-body');
+                            const content = (data.sections && data.sections[heading]) || '';
+                            body.innerHTML = content ? simpleMd(content) : '<span style="color:#999">AI 未能生成此部分分析</span>';
+                        }
+                    }
+
+                    // Collapse streaming, show cards
+                    llmStreaming.classList.add('collapsed');
+                    llmCards.classList.remove('hidden');
+                    // Trigger reflow for animation
+                    requestAnimationFrame(() => llmCards.classList.add('visible'));
+                    llmToggleRaw.classList.remove('hidden');
+                    llmBtn.disabled = false;
+                }
+                else if (data.type === 'error') {
+                    llmEventSource.close();
+                    llmEventSource = null;
+                    llmStreamingText.innerHTML += `<br><span style="color:#e74c3c">${data.message}</span>`;
+                    llmBtn.disabled = false;
+                }
+            };
+
+            llmEventSource.onerror = function() {
+                llmEventSource.close();
+                llmEventSource = null;
+                llmStreamingText.innerHTML += '<br><span style="color:#e74c3c">连接中断</span>';
+                llmBtn.disabled = false;
+            };
+        });
+    }
+
+    // Toggle raw text
+    if (llmToggleRaw) {
+        llmToggleRaw.addEventListener('click', () => {
+            const isCollapsed = llmStreaming.classList.contains('collapsed');
+            if (isCollapsed) {
+                llmStreaming.classList.remove('collapsed');
+                llmToggleRaw.textContent = '折叠原文';
+            } else {
+                llmStreaming.classList.add('collapsed');
+                llmToggleRaw.textContent = '展开原文';
+            }
+        });
+    }
+
+    // ==================== Download Report ====================
     downloadReportBtn.addEventListener('click', () => {
         let reportText;
 

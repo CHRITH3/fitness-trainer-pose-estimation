@@ -140,6 +140,42 @@
                     </div>
                     <button class="btn primary-btn" id="download-report-btn">Download Report</button>
                 </div>
+
+                <!-- LLM Analysis Section (trampoline mode only) -->
+                <div class="section llm-section hidden" id="llm-section">
+                    <h2>AI 分析</h2>
+                    <button class="btn primary-btn" id="llm-btn" disabled>开始 AI 分析</button>
+
+                    <!-- Streaming state -->
+                    <div class="llm-streaming hidden" id="llm-streaming">
+                        <div class="llm-streaming-header">
+                            <span class="llm-status-dot"></span>
+                            <span>正在分析...</span>
+                        </div>
+                        <div class="llm-streaming-text" id="llm-streaming-text"></div>
+                    </div>
+
+                    <!-- Cards state -->
+                    <div class="llm-cards hidden" id="llm-cards">
+                        <div class="llm-card" id="llm-card-overview">
+                            <h3>整体表现</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                        <div class="llm-card" id="llm-card-issues">
+                            <h3>主要问题</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                        <div class="llm-card" id="llm-card-details">
+                            <h3>逐跳点评</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                        <div class="llm-card" id="llm-card-suggestions">
+                            <h3>改进建议</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                    </div>
+                    <button class="btn llm-toggle-raw hidden" id="llm-toggle-raw">展开原文</button>
+                </div>
             </div>
         </div>
 

@@ -9,5 +9,8 @@ pyyaml>=6.0.0
 imageio>=2.31.0
 imageio-ffmpeg>=0.4.8
 
+# LLM integration (OpenAI-compatible API for Qianwen)
+openai>=1.0.0
+
 # Optional: For better chart rendering in dashboard (included via CDN)
 # matplotlib>=3.5.0

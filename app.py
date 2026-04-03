@@ -668,6 +668,11 @@ def process_video_subprocess(video_id):
             if results.get('mode') == 'trampoline':
                 analysis['current_action'] = results.get('current_action', '--')
                 analysis['completed_jumps'] = results.get('completed_jumps', [])
+
+            # Video metadata for LLM report
+            analysis['fps'] = results.get('fps', 30)
+            analysis['total_frames'] = results.get('total_frames', 0)
+            analysis['resolution'] = results.get('resolution', 'unknown')
             
             # Get actual output video path from results (extension may have changed)
             actual_output_video = results.get('output_video', output_video_path)
@@ -762,6 +767,66 @@ def get_video_status(video_id):
         'current_action': analysis.get('current_action', '--'),
         'completed_jumps': analysis.get('completed_jumps', []),
     })
+
+@app.route('/api/video/llm_analysis/<video_id>', methods=['GET'])
+def llm_analysis(video_id):
+    """Stream LLM analysis of trampoline video results via SSE."""
+    analysis = video_analyses.get(video_id)
+
+    if not analysis:
+        return jsonify({'error': 'Video ID not found'}), 404
+    if analysis.get('mode') != 'trampoline':
+        return jsonify({'error': 'LLM analysis only available for trampoline mode'}), 400
+    if analysis.get('status') != 'completed':
+        return jsonify({'error': 'Video analysis not yet complete'}), 400
+
+    try:
+        from trampoline.llm_service import (
+            AnalysisReport, stream_llm_analysis, clean_chunk,
+            segment_response, get_cached, set_cached,
+        )
+    except ImportError as e:
+        return jsonify({'error': f'LLM service not available: {e}'}), 503
+
+    api_key = os.environ.get('QWEN_API_KEY', '')
+    if not api_key:
+        return jsonify({'error': 'QWEN_API_KEY not configured'}), 503
+
+    # Check cache
+    cached = get_cached(video_id)
+    if cached:
+        import json as _json
+        def cached_gen():
+            yield f"data: {_json.dumps({'type': 'done', 'sections': cached['sections'], 'full_text': cached['full_text']}, ensure_ascii=False)}\n\n"
+        return Response(cached_gen(), mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    report = AnalysisReport.from_video_analysis(analysis)
+
+    def generate():
+        import json as _json
+        full_text = ""
+        prev_chunk = ""
+
+        try:
+            for raw_chunk in stream_llm_analysis(report):
+                cleaned = clean_chunk(raw_chunk, prev_chunk)
+                if cleaned:
+                    full_text += cleaned
+                    yield f"data: {_json.dumps({'type': 'chunk', 'text': cleaned}, ensure_ascii=False)}\n\n"
+                    prev_chunk = cleaned
+
+            # Stream done — segment and cache
+            sections = segment_response(full_text)
+            set_cached(video_id, full_text, sections)
+            yield f"data: {_json.dumps({'type': 'done', 'sections': sections, 'full_text': full_text}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"LLM analysis error: {e}")
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 @app.route('/api/video/analyze_frame', methods=['POST'])
 def analyze_video_frame():

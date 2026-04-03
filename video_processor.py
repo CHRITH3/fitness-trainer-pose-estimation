@@ -477,6 +477,9 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         results['grade'] = current_stats['grade']
         results['state'] = 'COMPLETED'
         results['feedback'] = current_stats['feedback']
+        results['fps'] = fps
+        results['total_frames'] = total_frames
+        results['resolution'] = f"{width}x{height}"
 
         if is_trampoline:
             results['current_action'] = current_stats.get('current_action', '--')
