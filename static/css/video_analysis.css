@@ -665,6 +665,17 @@
     50% { opacity: 0.3; }
 }
 
+/* Quality model waiting indicator */
+.llm-quality-waiting {
+    background: #f0ad4e;
+    animation: llm-quality-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes llm-quality-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.3); }
+}
+
 .llm-streaming-text {
     background: linear-gradient(145deg, #1a1a2e, #16213e);
     color: #e0e0e0;

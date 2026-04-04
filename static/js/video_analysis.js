@@ -754,6 +754,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     llmStreamingText.innerHTML += simpleMd(data.text);
                     llmStreamingText.scrollTop = llmStreamingText.scrollHeight;
                 }
+                else if (data.type === 'fast_done') {
+                    // Fast model finished; waiting for quality model
+                    const header = llmStreaming.querySelector('.llm-streaming-header');
+                    if (header) {
+                        header.innerHTML = `
+                            <span class="llm-status-dot llm-quality-waiting"></span>
+                            <span>正在生成高质量分析...</span>
+                        `;
+                    }
+                }
                 else if (data.type === 'done') {
                     llmStreamFinished = true;
                     llmEventSource.close();

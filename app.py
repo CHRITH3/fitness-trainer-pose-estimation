@@ -794,8 +794,9 @@ def llm_analysis(video_id):
 
     try:
         from trampoline.llm_service import (
-            AnalysisReport, stream_llm_analysis, clean_chunk,
-            segment_response, get_cached, set_cached, resolve_api_key,
+            AnalysisReport, stream_llm_analysis, run_llm_analysis_sync,
+            clean_chunk, segment_response, get_cached, set_cached,
+            resolve_api_key, resolve_models,
         )
     except ImportError as e:
         return sse_message({'type': 'error', 'message': f'LLM service not available: {e}'})
@@ -815,21 +816,60 @@ def llm_analysis(video_id):
     report = AnalysisReport.from_video_analysis(analysis)
 
     def generate():
-        full_text = ""
+        import threading
+        fast_model, quality_model = resolve_models()
+
+        # Shared state for quality model background thread
+        quality_result = {"text": None, "error": None, "done": False}
+
+        def run_quality():
+            try:
+                text = run_llm_analysis_sync(report, model=quality_model, timeout=90)
+                if text.startswith("[ERROR]"):
+                    quality_result["error"] = text
+                else:
+                    quality_result["text"] = text
+            except Exception as e:
+                quality_result["error"] = str(e)
+            finally:
+                quality_result["done"] = True
+
+        # Start quality model in background
+        quality_thread = threading.Thread(target=run_quality, daemon=True)
+        quality_thread.start()
+
+        # Stream fast model to frontend
+        fast_full_text = ""
         prev_chunk = ""
 
         try:
-            for raw_chunk in stream_llm_analysis(report):
+            for raw_chunk in stream_llm_analysis(report, model=fast_model):
                 cleaned = clean_chunk(raw_chunk, prev_chunk)
                 if cleaned:
-                    full_text += cleaned
+                    fast_full_text += cleaned
                     yield f"data: {_json.dumps({'type': 'chunk', 'text': cleaned}, ensure_ascii=False)}\n\n"
                     prev_chunk = cleaned
 
-            # Stream done — segment and cache
-            sections = segment_response(full_text)
-            set_cached(video_id, full_text, sections)
-            yield f"data: {_json.dumps({'type': 'done', 'sections': sections, 'full_text': full_text}, ensure_ascii=False)}\n\n"
+            # Fast model done
+            yield f"data: {_json.dumps({'type': 'fast_done'}, ensure_ascii=False)}\n\n"
+
+            # Wait for quality model (max 120s)
+            quality_thread.join(timeout=120)
+
+            # Prefer quality model result, fallback to fast
+            if quality_result.get("text"):
+                final_text = quality_result["text"]
+                source = "quality"
+            elif fast_full_text and not fast_full_text.startswith("[ERROR]"):
+                final_text = fast_full_text
+                source = "fast_fallback"
+            else:
+                yield f"data: {_json.dumps({'type': 'error', 'message': '两个模型均调用失败'}, ensure_ascii=False)}\n\n"
+                return
+
+            sections = segment_response(final_text)
+            set_cached(video_id, final_text, sections)
+            yield f"data: {_json.dumps({'type': 'done', 'sections': sections, 'full_text': final_text, 'source': source}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.error(f"LLM analysis error: {e}")

@@ -138,13 +138,21 @@ def resolve_api_key() -> str:
         or ""
     )
 
-def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generator[str, None, None]:
+
+def resolve_models() -> tuple:
+    """Return (fast_model, quality_model) from environment."""
+    fast = os.environ.get("QWEN_FAST_MODEL", "qwen-plus")
+    quality = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
+    return fast, quality
+
+
+def stream_llm_analysis(report: AnalysisReport, model: str = None, timeout: float = 60) -> Generator[str, None, None]:
     """Stream LLM analysis chunks. Yields text strings.
 
-    Reads config from environment:
-      QWEN_API_KEY / DASHSCOPE_API_KEY (required)
-      QWEN_BASE_URL (default: https://dashscope.aliyuncs.com/compatible-mode/v1)
-      QWEN_MODEL (default: qwen-plus)
+    Args:
+        report: Structured analysis data.
+        model: Model name override. Defaults to QWEN_MODEL env var.
+        timeout: API timeout in seconds.
     """
     try:
         import openai
@@ -154,7 +162,8 @@ def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generato
 
     api_key = resolve_api_key()
     base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    model = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
+    if model is None:
+        model = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
 
     if not api_key:
         yield "\n\n[ERROR] 未配置 QWEN_API_KEY 或 DASHSCOPE_API_KEY 环境变量"
@@ -174,6 +183,35 @@ def stream_llm_analysis(report: AnalysisReport, timeout: float = 60) -> Generato
                 yield chunk.choices[0].delta.content
     except Exception as e:
         yield f"\n\n[ERROR] LLM 调用失败: {type(e).__name__}: {e}"
+
+
+def run_llm_analysis_sync(report: AnalysisReport, model: str = None, timeout: float = 90) -> str:
+    """Run LLM analysis synchronously (non-streaming). Returns full text or error string."""
+    try:
+        import openai
+    except ImportError:
+        return "[ERROR] openai 库未安装"
+
+    api_key = resolve_api_key()
+    base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    if model is None:
+        model = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
+
+    if not api_key:
+        return "[ERROR] 未配置 API key"
+
+    messages = build_prompt(report)
+
+    try:
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=False,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as e:
+        return f"[ERROR] LLM 调用失败: {type(e).__name__}: {e}"
 
 
 # ── D. Response Cleaning & Segmentation ────────────────────────────

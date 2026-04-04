@@ -5,7 +5,8 @@ Tests for LLM service: report building, prompt generation, response segmentation
 import pytest
 from trampoline.llm_service import (
     AnalysisReport, build_prompt, clean_chunk, segment_response,
-    get_cached, set_cached, resolve_api_key, _llm_cache,
+    get_cached, set_cached, resolve_api_key, resolve_models,
+    run_llm_analysis_sync, _llm_cache,
 )
 
 
@@ -158,6 +159,32 @@ class TestApiKeyResolution:
         monkeypatch.delenv('QWEN_API_KEY', raising=False)
         monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
         assert resolve_api_key() == ''
+
+
+class TestResolveModels:
+    def test_defaults(self, monkeypatch):
+        monkeypatch.delenv('QWEN_FAST_MODEL', raising=False)
+        monkeypatch.delenv('QWEN_MODEL', raising=False)
+        fast, quality = resolve_models()
+        assert fast == 'qwen-plus'
+        assert quality == 'qwen3.6-plus-2026-04-02'
+
+    def test_custom_env(self, monkeypatch):
+        monkeypatch.setenv('QWEN_FAST_MODEL', 'custom-fast')
+        monkeypatch.setenv('QWEN_MODEL', 'custom-quality')
+        fast, quality = resolve_models()
+        assert fast == 'custom-fast'
+        assert quality == 'custom-quality'
+
+
+class TestRunLlmAnalysisSync:
+    def test_returns_error_without_api_key(self, monkeypatch, mock_analysis):
+        monkeypatch.delenv('QWEN_API_KEY', raising=False)
+        monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
+        report = AnalysisReport.from_video_analysis(mock_analysis)
+        result = run_llm_analysis_sync(report)
+        assert result.startswith('[ERROR]')
+        assert 'API key' in result
 
 
 if __name__ == "__main__":
