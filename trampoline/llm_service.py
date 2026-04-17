@@ -53,6 +53,7 @@ class AnalysisReport:
         # Action distribution (excluding intermediate bounces)
         real_jumps = [j for j in jumps if not j.get("is_intermediate")]
         dist = dict(Counter(j.get("action", "Unknown") for j in real_jumps))
+        landing_points = [j.get("landing") for j in enriched if j.get("landing")]
 
         return cls(
             total_jumps=analysis.get("reps", len(jumps)),
@@ -61,6 +62,7 @@ class AnalysisReport:
             resolution=analysis.get("resolution", "unknown"),
             completed_jumps=enriched,
             action_distribution=dist,
+            landing_points=landing_points or None,
         )
 
 
@@ -97,9 +99,16 @@ def build_prompt(report: AnalysisReport) -> list:
     jump_lines = []
     for j in report.completed_jumps:
         inter = "（中间直跳）" if j.get("is_intermediate") else ""
+        landing = j.get("landing")
+        landing_text = ""
+        if landing:
+            xy = landing.get("bed_xy_m") or ["?", "?"]
+            conf = landing.get("confidence", "?")
+            zone = landing.get("zone", "?")
+            landing_text = f" | 落点 ({xy[0]}, {xy[1]})m / {zone} / 置信度 {conf}"
         jump_lines.append(
             f"  第{j['jump_number']}跳: {j['action']} | "
-            f"滞空 {j.get('flight_duration_s', '?')}秒 ({j.get('flight_frames', '?')}帧){inter}"
+            f"滞空 {j.get('flight_duration_s', '?')}秒 ({j.get('flight_frames', '?')}帧){inter}{landing_text}"
         )
 
     # Format action distribution
@@ -118,6 +127,17 @@ def build_prompt(report: AnalysisReport) -> list:
 ## 逐跳详情
 {chr(10).join(jump_lines) if jump_lines else "无跳跃数据"}
 """
+
+    if report.landing_points:
+        user_content += "\n## 落点数据\n"
+        for idx, landing in enumerate(report.landing_points, 1):
+            xy = landing.get("bed_xy_m") or ["?", "?"]
+            user_content += (
+                f"- 落点{idx}: ({xy[0]}, {xy[1]})m | "
+                f"区域 {landing.get('zone', '?')} | "
+                f"距中心 {landing.get('dist_from_center_m', '?')}m | "
+                f"置信度 {landing.get('confidence', '?')}\n"
+            )
 
     if report.extra_sections:
         user_content += f"\n## 补充数据\n{report.extra_sections}\n"

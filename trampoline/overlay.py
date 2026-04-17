@@ -6,6 +6,7 @@ All sizes scale proportionally to video dimensions.
 
 import math
 import cv2
+import numpy as np
 from trampoline.config import LANDMARK
 
 
@@ -28,7 +29,7 @@ PHASE_COLORS = {
 _REF_W = 640
 
 
-def draw_trampoline_overlay(frame, stats):
+def draw_trampoline_overlay(frame, stats, bed_info=None):
     """
     Draw trampoline analysis overlay on video frame.
     All dimensions scale with video resolution.
@@ -93,6 +94,86 @@ def draw_trampoline_overlay(frame, stats):
     velocity = stats.get("velocity", 0)
     _draw_velocity_bar(frame, velocity, w, h, ref)
 
+    # --- Optional bed tracking overlay ---
+    if bed_info:
+        draw_bed_quad(frame, bed_info.get("corners"), bed_info.get("tracking_confidence"))
+    latest_landing = stats.get("latest_landing")
+    if latest_landing:
+        draw_landing_marker(frame, latest_landing.get("ankle_px"), latest_landing, latest_landing.get("zone"))
+    landings = stats.get("landings") or []
+    if landings:
+        draw_bed_minimap(frame, landings)
+
+    return frame
+
+
+def draw_bed_quad(frame, corners, confidence=None):
+    """Draw the tracked trampoline bed quadrilateral."""
+    if not corners or len(corners) != 4:
+        return frame
+    quad = np.array(corners, dtype=np.float32).reshape(-1, 2)
+    if not np.all(np.isfinite(quad)):
+        return frame
+    quad_i = np.round(quad).astype(np.int32)
+    overlay = frame.copy()
+    cv2.fillConvexPoly(overlay, quad_i, (0, 180, 80))
+    cv2.addWeighted(overlay, 0.16, frame, 0.84, 0, frame)
+    cv2.polylines(frame, [quad_i], isClosed=True, color=(0, 230, 118), thickness=2, lineType=cv2.LINE_AA)
+    if confidence is not None:
+        label = f"Bed {float(confidence):.2f}"
+        x, y = int(quad_i[0][0]), int(quad_i[0][1])
+        cv2.putText(frame, label, (x, max(15, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 230, 118), 1, cv2.LINE_AA)
+    return frame
+
+
+def draw_landing_marker(frame, ankle_px, landing, zone=None):
+    """Draw a cross marker at the ankle pixel for the latest landing."""
+    if not ankle_px or len(ankle_px) < 2:
+        return frame
+    try:
+        x, y = int(round(float(ankle_px[0]))), int(round(float(ankle_px[1])))
+    except (TypeError, ValueError):
+        return frame
+    conf = landing.get("confidence") if isinstance(landing, dict) else None
+    color = (0, 230, 118) if conf is None or conf >= 0.6 else (0, 190, 255) if conf >= 0.35 else (0, 0, 255)
+    size = 10
+    cv2.line(frame, (x - size, y), (x + size, y), color, 2, cv2.LINE_AA)
+    cv2.line(frame, (x, y - size), (x, y + size), color, 2, cv2.LINE_AA)
+    label = zone or (landing.get("zone") if isinstance(landing, dict) else "landing")
+    if conf is not None:
+        label = f"{label} {float(conf):.2f}"
+    cv2.putText(frame, label, (x + 12, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+    return frame
+
+
+def draw_bed_minimap(frame, landings):
+    """Draw a compact top-down landing map in the lower-right corner."""
+    if not landings:
+        return frame
+    h, w = frame.shape[:2]
+    box_w, box_h = 150, 85
+    margin = 15
+    x0, y0 = w - box_w - margin, h - box_h - margin
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x0, y0), (x0 + box_w, y0 + box_h), (25, 25, 25), -1)
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+    pad = 12
+    rect = (x0 + pad, y0 + pad, box_w - 2 * pad, box_h - 2 * pad)
+    cv2.rectangle(frame, (rect[0], rect[1]), (rect[0] + rect[2], rect[1] + rect[3]), (180, 180, 180), 1)
+    cv2.line(frame, (rect[0] + rect[2] // 2, rect[1]), (rect[0] + rect[2] // 2, rect[1] + rect[3]), (90, 90, 90), 1)
+    cv2.line(frame, (rect[0], rect[1] + rect[3] // 2), (rect[0] + rect[2], rect[1] + rect[3] // 2), (90, 90, 90), 1)
+    for landing in landings[-20:]:
+        norm = landing.get("norm_xy") if isinstance(landing, dict) else None
+        if not norm or len(norm) < 2:
+            continue
+        nx = max(0.0, min(1.0, float(norm[0])))
+        ny = max(0.0, min(1.0, float(norm[1])))
+        px = int(rect[0] + nx * rect[2])
+        py = int(rect[1] + ny * rect[3])
+        conf = float(landing.get("confidence", 1.0))
+        color = (0, 230, 118) if conf >= 0.6 else (0, 190, 255) if conf >= 0.35 else (0, 0, 255)
+        cv2.circle(frame, (px, py), 3, color, -1, cv2.LINE_AA)
+    cv2.putText(frame, "Landings", (x0 + pad, y0 + box_h - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (210, 210, 210), 1, cv2.LINE_AA)
     return frame
 
 

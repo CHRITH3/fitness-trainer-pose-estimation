@@ -45,6 +45,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Trampoline Elements
     const actionCard = document.getElementById('action-card');
     const statAction = document.getElementById('stat-action');
+    const cornerStep = document.getElementById('corner-marking-step');
+    const cornerCanvas = document.getElementById('corner-canvas');
+    const cornerCtx = cornerCanvas ? cornerCanvas.getContext('2d') : null;
+    const cornerCount = document.getElementById('corner-count');
+    const resetCornersBtn = document.getElementById('reset-corners');
+    const confirmCornersBtn = document.getElementById('confirm-corners');
 
     // LLM Elements
     const llmSection = document.getElementById('llm-section');
@@ -60,6 +66,11 @@ document.addEventListener('DOMContentLoaded', function() {
     let analysisInterval = null;
     let exercisesData = {};
     let currentVideoId = null;  // module-level for LLM access
+    let pendingTrampolineVideoId = null;
+    let cornerImage = null;
+    let cornerPoints = [];
+    const cornerOrder = ['front_left', 'front_right', 'back_right', 'back_left'];
+    const cornerLabels = ['前左', '前右', '后右', '后左'];
     let llmEventSource = null;
     let analysisResults = {
         reps: 0,
@@ -253,6 +264,10 @@ document.addEventListener('DOMContentLoaded', function() {
         videoPlayer.src = '';
         uploadArea.hidden = false;
         analysisCanvas.hidden = true;
+        if (cornerStep) cornerStep.classList.add('hidden');
+        if (cornerCanvas && cornerCtx) cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
+        cornerPoints = [];
+        pendingTrampolineVideoId = null;
         videoFile = null;
 
         playBtn.disabled = true;
@@ -322,10 +337,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             if (data.success) {
                 addLog(`Upload complete. Video ID: ${data.video_id}`, 'success');
-                addLog('Initializing pose estimation engine...', 'processing');
-                addLog('Starting frame-by-frame analysis...', 'processing');
-                addFeedback('success', 'Video uploaded successfully. Processing...');
-                startAnalysisPolling(data.video_id);
+                if (isTrampolineMode && data.status === 'uploaded_pending_calibration') {
+                    pendingTrampolineVideoId = data.video_id;
+                    currentVideoId = data.video_id;
+                    isAnalyzing = false;
+                    stopAnalysisBtn.disabled = true;
+                    addLog('Trampoline calibration required before analysis starts.', 'info');
+                    addFeedback('info', '请在首帧上标记床面四角后开始分析');
+                    setupCornerCanvas(data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`, data.video_id);
+                } else {
+                    addLog('Initializing pose estimation engine...', 'processing');
+                    addLog('Starting frame-by-frame analysis...', 'processing');
+                    addFeedback('success', 'Video uploaded successfully. Processing...');
+                    startAnalysisPolling(data.video_id);
+                }
             } else {
                 addLog(`Upload failed: ${data.error}`, 'error');
                 setTerminalStatus('Error', 'error');
@@ -340,6 +365,111 @@ document.addEventListener('DOMContentLoaded', function() {
             stopAnalysis();
         }
     });
+
+
+    function setupCornerCanvas(imageSrc, videoId) {
+        if (!cornerStep || !cornerCanvas || !cornerCtx) return;
+        cornerStep.classList.remove('hidden');
+        videoPlayer.pause();
+        videoPlayer.hidden = true;
+        analysisCanvas.hidden = true;
+        cornerPoints = [];
+        if (cornerCount) cornerCount.textContent = '0/4';
+        if (confirmCornersBtn) confirmCornersBtn.disabled = true;
+
+        cornerImage = new Image();
+        cornerImage.onload = function() {
+            cornerCanvas.width = cornerImage.naturalWidth || cornerImage.width;
+            cornerCanvas.height = cornerImage.naturalHeight || cornerImage.height;
+            drawCornerCanvas();
+        };
+        cornerImage.src = imageSrc;
+        pendingTrampolineVideoId = videoId;
+    }
+
+    function drawCornerCanvas() {
+        if (!cornerCtx || !cornerImage) return;
+        cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
+        cornerCtx.drawImage(cornerImage, 0, 0, cornerCanvas.width, cornerCanvas.height);
+        cornerCtx.lineWidth = 3;
+        cornerCtx.strokeStyle = '#00d4aa';
+        cornerCtx.fillStyle = '#00d4aa';
+        if (cornerPoints.length > 1) {
+            cornerCtx.beginPath();
+            cornerCtx.moveTo(cornerPoints[0].x, cornerPoints[0].y);
+            for (let i = 1; i < cornerPoints.length; i++) {
+                cornerCtx.lineTo(cornerPoints[i].x, cornerPoints[i].y);
+            }
+            if (cornerPoints.length === 4) cornerCtx.closePath();
+            cornerCtx.stroke();
+        }
+        cornerPoints.forEach((pt, idx) => {
+            cornerCtx.beginPath();
+            cornerCtx.arc(pt.x, pt.y, 7, 0, Math.PI * 2);
+            cornerCtx.fill();
+            cornerCtx.fillStyle = '#ffffff';
+            cornerCtx.font = '18px sans-serif';
+            cornerCtx.fillText(`${idx + 1}.${cornerLabels[idx]}`, pt.x + 10, pt.y - 10);
+            cornerCtx.fillStyle = '#00d4aa';
+        });
+    }
+
+    if (cornerCanvas) {
+        cornerCanvas.addEventListener('click', (e) => {
+            if (!cornerImage || cornerPoints.length >= 4) return;
+            const rect = cornerCanvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (cornerCanvas.width / rect.width);
+            const y = (e.clientY - rect.top) * (cornerCanvas.height / rect.height);
+            cornerPoints.push({ name: cornerOrder[cornerPoints.length], x, y });
+            if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
+            if (confirmCornersBtn) confirmCornersBtn.disabled = cornerPoints.length !== 4;
+            drawCornerCanvas();
+        });
+    }
+
+    if (resetCornersBtn) {
+        resetCornersBtn.addEventListener('click', () => {
+            cornerPoints = [];
+            if (cornerCount) cornerCount.textContent = '0/4';
+            if (confirmCornersBtn) confirmCornersBtn.disabled = true;
+            drawCornerCanvas();
+        });
+    }
+
+    if (confirmCornersBtn) {
+        confirmCornersBtn.addEventListener('click', async () => {
+            if (!pendingTrampolineVideoId || cornerPoints.length !== 4) return;
+            confirmCornersBtn.disabled = true;
+            addLog('Submitting bed corner calibration...', 'processing');
+            try {
+                const response = await fetch('/api/video/trampoline/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_id: pendingTrampolineVideoId, corners: cornerPoints })
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    addLog(`Calibration failed: ${data.error}`, 'error');
+                    addFeedback('error', `Calibration failed: ${data.error}`);
+                    confirmCornersBtn.disabled = false;
+                    return;
+                }
+                addLog('Calibration accepted. Starting frame-by-frame analysis...', 'success');
+                addFeedback('success', 'Calibration accepted. Processing...');
+                if (cornerStep) cornerStep.classList.add('hidden');
+                videoPlayer.hidden = false;
+                isAnalyzing = true;
+                analysisResults.startTime = new Date();
+                stopAnalysisBtn.disabled = false;
+                setTerminalStatus('Processing', 'running');
+                startAnalysisPolling(pendingTrampolineVideoId);
+            } catch (error) {
+                addLog(`Calibration request failed: ${error.message}`, 'error');
+                addFeedback('error', 'Failed to submit calibration');
+                confirmCornersBtn.disabled = false;
+            }
+        });
+    }
 
     // Poll for analysis results
     let lastProgress = 0;
@@ -672,13 +802,26 @@ document.addEventListener('DOMContentLoaded', function() {
         const actionBreakdown = Object.entries(actionCounts)
             .map(([k, v]) => `${k}: ${v}`).join(', ') || '--';
 
+        function fmtNum(value, digits = 2) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n.toFixed(digits) : String(value ?? '?');
+        }
+
         // Per-jump details
         let jumpDetails = '';
         realJumps.forEach((jump, i) => {
+            const landing = jump.landing;
+            let landingText = '落点: --';
+            if (landing) {
+                const xy = landing.bed_xy_m || ['?', '?'];
+                const conf = landing.confidence !== undefined ? Number(landing.confidence).toFixed(2) : '--';
+                const low = landing.confidence !== undefined && Number(landing.confidence) < 0.5;
+                landingText = `落点: (${fmtNum(xy[0])}, ${fmtNum(xy[1])})m / ${landing.zone || '--'} / conf ${conf}${low ? ' <span class="landing-low-confidence">低置信</span>' : ''}`;
+            }
             jumpDetails += `
                 <div class="report-row">
                     <span class="report-label">Jump ${jump.jump_number || (i + 1)}</span>
-                    <span class="report-value">${jump.action} <span class="jump-flight-info">(${jump.flight_frames}f)</span></span>
+                    <span class="report-value">${jump.action} <span class="jump-flight-info">(${jump.flight_frames}f)</span><br><small>${landingText}</small></span>
                 </div>`;
         });
 
@@ -848,7 +991,7 @@ Intermediate Bounces: ${jumps.filter(j => j.is_intermediate).length}
 
 JUMP DETAILS
 ------------
-${realJumps.map((j, i) => `Jump ${j.jump_number || (i + 1)}: ${j.action} (flight: ${j.flight_frames} frames)`).join('\n')}
+${realJumps.map((j, i) => { const l = j.landing; const landing = l ? ` | landing: (${(l.bed_xy_m || [])[0]}, ${(l.bed_xy_m || [])[1]})m ${l.zone || ''} conf=${l.confidence}` : ''; return `Jump ${j.jump_number || (i + 1)}: ${j.action} (flight: ${j.flight_frames} frames)${landing}`; }).join('\n')}
 
 FEEDBACK LOG
 ------------

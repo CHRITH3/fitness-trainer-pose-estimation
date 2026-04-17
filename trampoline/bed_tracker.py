@@ -1,0 +1,456 @@
+"""Bed plane calibration, tracking, and landing-zone mapping for trampoline videos."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import cv2
+import numpy as np
+
+import trampoline.config as cfg
+
+CORNER_ORDER = ["front_left", "front_right", "back_right", "back_left"]
+
+
+class BedTrackerValidationError(ValueError):
+    """Raised when calibration corners or sidecar data are invalid."""
+
+
+@dataclass
+class BedTrackerInfo:
+    success: bool
+    frame_index: Optional[int]
+    corners: List[List[float]]
+    inlier_ratio: float
+    tracked_points: int
+    tracking_confidence: float
+    message: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "frame_index": self.frame_index,
+            "corners": self.corners,
+            "inlier_ratio": self.inlier_ratio,
+            "tracked_points": self.tracked_points,
+            "tracking_confidence": self.tracking_confidence,
+            "message": self.message,
+        }
+
+
+def _coerce_point(point: Any, default_name: Optional[str] = None) -> Dict[str, float]:
+    if isinstance(point, dict):
+        if "x" not in point or "y" not in point:
+            raise BedTrackerValidationError("Corner point is missing x/y")
+        name = point.get("name", default_name)
+        x, y = point["x"], point["y"]
+    elif isinstance(point, (list, tuple)) and len(point) >= 2:
+        name = default_name
+        x, y = point[0], point[1]
+    else:
+        raise BedTrackerValidationError("Corner point must be {x,y} or [x,y]")
+
+    try:
+        xf = float(x)
+        yf = float(y)
+    except (TypeError, ValueError) as exc:
+        raise BedTrackerValidationError("Corner coordinates must be numeric") from exc
+    if not (math.isfinite(xf) and math.isfinite(yf)):
+        raise BedTrackerValidationError("Corner coordinates must be finite")
+    return {"name": name or "", "x": xf, "y": yf}
+
+
+def normalize_corners(corners: Sequence[Any]) -> List[Dict[str, float]]:
+    """Normalize corner input to named `{name, x, y}` dictionaries.
+
+    Accepted input shapes:
+    - `[[x, y], ...]` in canonical corner order.
+    - `[{"name": ..., "x": ..., "y": ...}, ...]`.
+    """
+    if len(corners) != 4:
+        raise BedTrackerValidationError("Exactly 4 bed corners are required")
+    normalized = [_coerce_point(p, CORNER_ORDER[i]) for i, p in enumerate(corners)]
+    names = [p.get("name") or CORNER_ORDER[i] for i, p in enumerate(normalized)]
+    if names != CORNER_ORDER:
+        raise BedTrackerValidationError(
+            f"Corners must be ordered as {', '.join(CORNER_ORDER)}"
+        )
+    for i, p in enumerate(normalized):
+        p["name"] = CORNER_ORDER[i]
+    return normalized
+
+
+def corners_to_array(corners: Sequence[Any]) -> np.ndarray:
+    normalized = normalize_corners(corners)
+    return np.array([[p["x"], p["y"]] for p in normalized], dtype=np.float32)
+
+
+def _segment_intersection(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:
+    def orient(p, q, r):
+        return float((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]))
+
+    o1 = orient(a, b, c)
+    o2 = orient(a, b, d)
+    o3 = orient(c, d, a)
+    o4 = orient(c, d, b)
+    return (o1 * o2 < 0) and (o3 * o4 < 0)
+
+
+def validate_corners(
+    corners: Sequence[Any],
+    image_size: Optional[Tuple[int, int]] = None,
+    min_area_px: Optional[float] = None,
+    min_area_ratio: Optional[float] = None,
+) -> List[Dict[str, float]]:
+    """Validate corner geometry and return normalized corners.
+
+    `image_size` is `(width, height)` when available.
+    """
+    normalized = normalize_corners(corners)
+    pts = np.array([[p["x"], p["y"]] for p in normalized], dtype=np.float32)
+
+    if image_size is not None:
+        width, height = image_size
+        for p in normalized:
+            if p["x"] < 0 or p["x"] >= width or p["y"] < 0 or p["y"] >= height:
+                raise BedTrackerValidationError("Corner point is outside the first-frame bounds")
+
+    min_dist = getattr(cfg, "BED_CORNER_MIN_DISTANCE_PX", 5.0)
+    for i in range(4):
+        for j in range(i + 1, 4):
+            if float(np.linalg.norm(pts[i] - pts[j])) < min_dist:
+                raise BedTrackerValidationError("Corner points are duplicated or too close together")
+
+    area = abs(float(cv2.contourArea(pts.reshape(-1, 1, 2))))
+    min_area_px = min_area_px if min_area_px is not None else getattr(cfg, "BED_MIN_QUAD_AREA_PX", 100.0)
+    if area < min_area_px:
+        raise BedTrackerValidationError("Bed quadrilateral area is too small")
+    if image_size is not None:
+        width, height = image_size
+        ratio = area / max(1.0, float(width * height))
+        min_area_ratio = min_area_ratio if min_area_ratio is not None else getattr(cfg, "BED_MIN_QUAD_AREA_RATIO", 0.01)
+        if ratio < min_area_ratio:
+            raise BedTrackerValidationError("Bed quadrilateral area is too small for the frame")
+
+    if _segment_intersection(pts[0], pts[1], pts[2], pts[3]) or _segment_intersection(pts[1], pts[2], pts[3], pts[0]):
+        raise BedTrackerValidationError("Bed corners form a self-intersecting quadrilateral")
+
+    # The required visual order front-left -> front-right -> back-right -> back-left
+    # should form a simple clockwise/counter-clockwise polygon. The signed area may
+    # differ by camera/view convention, so self-intersection + homography degeneracy
+    # are the hard order checks for MVP.
+    bed_ref = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32)
+    H, _ = cv2.findHomography(pts, bed_ref, 0)
+    if H is None or not np.all(np.isfinite(H)):
+        raise BedTrackerValidationError("Bed corners cannot form a valid homography")
+    return normalized
+
+
+def load_corners_sidecar(path: str, expected_video_id: Optional[str] = None) -> Dict[str, Any]:
+    import json
+
+    with open(path, "r") as f:
+        data = json.load(f)
+    required = [
+        "schema_version",
+        "video_id",
+        "exercise_type",
+        "frame_index",
+        "image_size",
+        "corner_order",
+        "corners_px",
+        "bed_dimensions_m",
+        "created_at",
+    ]
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise BedTrackerValidationError(f"Corners sidecar missing required fields: {', '.join(missing)}")
+    if data.get("schema_version") != 1:
+        raise BedTrackerValidationError("Unsupported corners sidecar schema_version")
+    if expected_video_id and data.get("video_id") != expected_video_id:
+        raise BedTrackerValidationError("Corners sidecar video_id does not match the job")
+    if data.get("exercise_type") != "trampoline":
+        raise BedTrackerValidationError("Corners sidecar is not for trampoline analysis")
+    if data.get("corner_order") != CORNER_ORDER:
+        raise BedTrackerValidationError(f"Corners sidecar corner_order must be {CORNER_ORDER}")
+    try:
+        frame_index = int(data.get("frame_index"))
+    except (TypeError, ValueError) as exc:
+        raise BedTrackerValidationError("Corners sidecar frame_index must be an integer") from exc
+    if frame_index != 0:
+        raise BedTrackerValidationError("Corners sidecar must describe first-frame calibration (frame_index=0)")
+
+    image_size = data.get("image_size") or {}
+    width = image_size.get("width")
+    height = image_size.get("height")
+    if not width or not height:
+        raise BedTrackerValidationError("Corners sidecar image_size must include width and height")
+    size = (int(width), int(height))
+
+    dims = data.get("bed_dimensions_m") or {}
+    if not dims.get("width") or not dims.get("length"):
+        raise BedTrackerValidationError("Corners sidecar bed_dimensions_m must include width and length")
+    if not data.get("created_at"):
+        raise BedTrackerValidationError("Corners sidecar created_at is required")
+
+    validate_corners(data.get("corners_px", []), image_size=size)
+    return data
+
+
+def classify_landing_zone(
+    bed_xy_m: Sequence[float],
+    bed_size_m: Tuple[float, float] = None,
+) -> str:
+    """Classify a landing coordinate into center/mid/edge/off_bed."""
+    width, length = bed_size_m or (cfg.BED_WIDTH_M, cfg.BED_LENGTH_M)
+    x, y = float(bed_xy_m[0]), float(bed_xy_m[1])
+    if x < 0 or y < 0 or x > width or y > length:
+        return "off_bed"
+
+    edge_margin = getattr(cfg, "ZONE_EDGE_MARGIN_M", 0.3)
+    dist_edge = min(x, y, width - x, length - y)
+    if dist_edge < edge_margin:
+        return "edge"
+
+    center = np.array([width / 2.0, length / 2.0], dtype=np.float32)
+    dist_center = float(np.linalg.norm(np.array([x, y], dtype=np.float32) - center))
+    if dist_center <= getattr(cfg, "ZONE_CENTER_RADIUS_M", 0.5):
+        return "center"
+    if dist_center <= getattr(cfg, "ZONE_MID_RADIUS_M", 1.0):
+        return "mid"
+    return "edge"
+
+
+class BedTracker:
+    """Track a calibrated trampoline bed plane and map image points to bed coordinates."""
+
+    def __init__(
+        self,
+        corners_image: Sequence[Any],
+        bed_size_m: Tuple[float, float] = None,
+        config: Optional[Any] = None,
+        image_size: Optional[Tuple[int, int]] = None,
+    ):
+        self.config = config or cfg
+        self.bed_size_m = bed_size_m or (cfg.BED_WIDTH_M, cfg.BED_LENGTH_M)
+        self.image_size = image_size
+        normalized = validate_corners(corners_image, image_size=image_size)
+        self.initial_corners = corners_to_array(normalized)
+        self.current_corners = self.initial_corners.copy()
+        self.H_image_to_bed: Optional[np.ndarray] = None
+        self._prev_gray: Optional[np.ndarray] = None
+        self._prev_pts: Optional[np.ndarray] = None
+        self._frame_index: Optional[int] = None
+        self._initialized = False
+        self.current_info = BedTrackerInfo(
+            success=False,
+            frame_index=None,
+            corners=self.current_corners.tolist(),
+            inlier_ratio=0.0,
+            tracked_points=0,
+            tracking_confidence=0.0,
+            message="not initialized",
+        ).to_dict()
+        self._compute_image_to_bed()
+
+    @classmethod
+    def from_sidecar(cls, sidecar: Dict[str, Any]) -> "BedTracker":
+        dims = sidecar.get("bed_dimensions_m") or {}
+        bed_size = (float(dims.get("width", cfg.BED_WIDTH_M)), float(dims.get("length", cfg.BED_LENGTH_M)))
+        image_size_d = sidecar.get("image_size") or {}
+        image_size = None
+        if image_size_d.get("width") and image_size_d.get("height"):
+            image_size = (int(image_size_d["width"]), int(image_size_d["height"]))
+        return cls(sidecar["corners_px"], bed_size_m=bed_size, image_size=image_size)
+
+    def _bed_reference_points(self) -> np.ndarray:
+        width, length = self.bed_size_m
+        return np.array([[0, 0], [width, 0], [width, length], [0, length]], dtype=np.float32)
+
+    def _compute_image_to_bed(self) -> None:
+        H, _ = cv2.findHomography(self.current_corners.astype(np.float32), self._bed_reference_points(), 0)
+        if H is None:
+            raise BedTrackerValidationError("Could not compute image-to-bed homography")
+        self.H_image_to_bed = H
+
+    def initialize(self, first_frame_bgr: np.ndarray, frame_index: int = 1) -> Dict[str, Any]:
+        if first_frame_bgr is None or first_frame_bgr.size == 0:
+            raise BedTrackerValidationError("Cannot initialize tracker from an empty frame")
+        self.image_size = (first_frame_bgr.shape[1], first_frame_bgr.shape[0])
+        # Revalidate now that image bounds are known.
+        validate_corners(self.current_corners.tolist(), image_size=self.image_size)
+        gray = cv2.cvtColor(first_frame_bgr, cv2.COLOR_BGR2GRAY)
+        self._prev_gray = gray
+        self._prev_pts = self._detect_features(gray)
+        self._frame_index = frame_index
+        self._initialized = True
+        tracked = 0 if self._prev_pts is None else len(self._prev_pts)
+        self.current_info = BedTrackerInfo(
+            success=True,
+            frame_index=frame_index,
+            corners=self.current_corners.tolist(),
+            inlier_ratio=1.0 if tracked else 0.0,
+            tracked_points=tracked,
+            tracking_confidence=self._tracking_confidence(1.0, tracked),
+            message="initialized",
+        ).to_dict()
+        return self.current_info
+
+    def _bed_mask(self, shape: Tuple[int, int]) -> np.ndarray:
+        mask = np.zeros(shape, dtype=np.uint8)
+        cv2.fillConvexPoly(mask, np.round(self.current_corners).astype(np.int32), 255)
+        return mask
+
+    def _detect_features(self, gray: np.ndarray) -> Optional[np.ndarray]:
+        mask = self._bed_mask(gray.shape)
+        pts = cv2.goodFeaturesToTrack(
+            gray,
+            maxCorners=getattr(self.config, "BED_MAX_FEATURES", 200),
+            qualityLevel=getattr(self.config, "BED_FEATURE_QUALITY", 0.01),
+            minDistance=getattr(self.config, "BED_FEATURE_MIN_DISTANCE", 8),
+            mask=mask,
+        )
+        if pts is None:
+            return None
+        return pts.reshape(-1, 1, 2).astype(np.float32)
+
+    def _tracking_confidence(self, inlier_ratio: float, tracked_points: int) -> float:
+        min_points = max(1, getattr(self.config, "BED_MIN_TRACK_POINTS", 20))
+        point_score = min(1.0, tracked_points / float(min_points))
+        return float(max(0.0, min(1.0, 0.65 * inlier_ratio + 0.35 * point_score)))
+
+    def update(self, frame_bgr: np.ndarray, frame_index: Optional[int] = None) -> Dict[str, Any]:
+        if not self._initialized:
+            return self.initialize(frame_bgr, frame_index or 1)
+
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        frame_index = frame_index if frame_index is not None else ((self._frame_index or 0) + 1)
+        message = "tracked"
+        success = False
+        inlier_ratio = 0.0
+        tracked_points = 0
+
+        if self._prev_gray is not None and self._prev_pts is not None and len(self._prev_pts) >= 4:
+            curr_pts, status, _ = cv2.calcOpticalFlowPyrLK(
+                self._prev_gray,
+                gray,
+                self._prev_pts,
+                None,
+                winSize=getattr(self.config, "BED_LK_WIN_SIZE", (15, 15)),
+                maxLevel=getattr(self.config, "BED_LK_MAX_LEVEL", 3),
+                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
+            )
+            if curr_pts is not None and status is not None:
+                back_pts, back_status, _ = cv2.calcOpticalFlowPyrLK(
+                    gray,
+                    self._prev_gray,
+                    curr_pts,
+                    None,
+                    winSize=getattr(self.config, "BED_LK_WIN_SIZE", (15, 15)),
+                    maxLevel=getattr(self.config, "BED_LK_MAX_LEVEL", 3),
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
+                )
+                fb = np.linalg.norm(self._prev_pts.reshape(-1, 2) - back_pts.reshape(-1, 2), axis=1) if back_pts is not None else np.full(len(status), np.inf)
+                valid = (status.reshape(-1) == 1) & (fb < getattr(self.config, "BED_FB_THRESHOLD", 1.0))
+                prev_good = self._prev_pts.reshape(-1, 2)[valid]
+                curr_good = curr_pts.reshape(-1, 2)[valid]
+                tracked_points = int(len(curr_good))
+                if tracked_points >= 4:
+                    H_delta, inliers = cv2.findHomography(
+                        prev_good,
+                        curr_good,
+                        cv2.RANSAC,
+                        getattr(self.config, "BED_RANSAC_REPROJ_THRESH", 3.0),
+                    )
+                    if H_delta is not None and inliers is not None:
+                        inlier_count = int(inliers.sum())
+                        inlier_ratio = inlier_count / max(1, tracked_points)
+                        new_corners = cv2.perspectiveTransform(
+                            self.current_corners.reshape(-1, 1, 2), H_delta
+                        ).reshape(-1, 2)
+                        if np.all(np.isfinite(new_corners)):
+                            self.current_corners = new_corners.astype(np.float32)
+                            self._compute_image_to_bed()
+                            success = True
+        if not success:
+            message = "tracking degraded; using previous homography"
+
+        # Refresh features from the current frame to keep LK well-conditioned for the next decoded frame.
+        redetect_due = (
+            not success
+            or tracked_points < getattr(self.config, "BED_MIN_TRACK_POINTS", 20)
+            or (frame_index % getattr(self.config, "BED_REDETECT_INTERVAL", 30) == 0)
+            or inlier_ratio < getattr(self.config, "BED_REDETECT_INLIER_RATIO", 0.5)
+        )
+        if redetect_due:
+            pts = self._detect_features(gray)
+            if pts is not None:
+                self._prev_pts = pts
+                tracked_points = max(tracked_points, int(len(pts)))
+        elif success:
+            self._prev_pts = curr_good.reshape(-1, 1, 2).astype(np.float32)
+
+        self._prev_gray = gray
+        self._frame_index = frame_index
+        tracking_conf = self._tracking_confidence(inlier_ratio if success else 0.0, tracked_points)
+        self.current_info = BedTrackerInfo(
+            success=success,
+            frame_index=frame_index,
+            corners=self.current_corners.tolist(),
+            inlier_ratio=float(inlier_ratio),
+            tracked_points=int(tracked_points),
+            tracking_confidence=tracking_conf,
+            message=message,
+        ).to_dict()
+        return self.current_info
+
+    def image_to_bed(self, pt_xy: Sequence[float]) -> Tuple[float, float]:
+        if self.H_image_to_bed is None:
+            raise BedTrackerValidationError("Tracker is not initialized")
+        pt = np.array([[[float(pt_xy[0]), float(pt_xy[1])]]], dtype=np.float32)
+        mapped = cv2.perspectiveTransform(pt, self.H_image_to_bed)[0, 0]
+        return float(mapped[0]), float(mapped[1])
+
+    def is_inside_bed(self, pt_xy: Sequence[float]) -> bool:
+        x, y = self.image_to_bed(pt_xy)
+        width, length = self.bed_size_m
+        return 0 <= x <= width and 0 <= y <= length
+
+    def landing_payload(self, pt_xy: Sequence[float], ankle_visibility: float = 1.0) -> Dict[str, Any]:
+        bed_xy = self.image_to_bed(pt_xy)
+        width, length = self.bed_size_m
+        norm = [bed_xy[0] / width if width else 0.0, bed_xy[1] / length if length else 0.0]
+        zone = classify_landing_zone(bed_xy, self.bed_size_m)
+        center = np.array([width / 2.0, length / 2.0], dtype=np.float32)
+        dist_center = float(np.linalg.norm(np.array(bed_xy, dtype=np.float32) - center))
+        tracking = float(self.current_info.get("tracking_confidence", 0.0))
+        ankle = max(0.0, min(1.0, float(ankle_visibility)))
+        bounds = self._bounds_confidence(norm)
+        confidence = max(0.0, min(1.0, 0.5 * tracking + 0.3 * ankle + 0.2 * bounds))
+        return {
+            "bed_xy_m": [round(float(bed_xy[0]), 3), round(float(bed_xy[1]), 3)],
+            "norm_xy": [round(float(norm[0]), 4), round(float(norm[1]), 4)],
+            "zone": zone,
+            "dist_from_center_m": round(dist_center, 3),
+            "confidence": round(confidence, 3),
+            "confidence_factors": {
+                "tracking": round(tracking, 3),
+                "ankle_visibility": round(ankle, 3),
+                "bounds": round(bounds, 3),
+            },
+        }
+
+    def _bounds_confidence(self, norm_xy: Sequence[float]) -> float:
+        nx, ny = float(norm_xy[0]), float(norm_xy[1])
+        if 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0:
+            return 1.0
+        # Preserve low-confidence output close to the bed, but make far outside landings weak.
+        overflow = max(-nx, nx - 1.0, -ny, ny - 1.0, 0.0)
+        return float(max(0.0, 1.0 - overflow / max(0.001, getattr(cfg, "BED_OFF_BED_CONFIDENCE_DECAY", 0.25))))
+
+    def draw_debug_overlay(self, frame: np.ndarray) -> np.ndarray:
+        pts = np.round(self.current_corners).astype(np.int32)
+        cv2.polylines(frame, [pts], isClosed=True, color=(0, 220, 80), thickness=2)
+        return frame

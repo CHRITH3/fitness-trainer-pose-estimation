@@ -372,3 +372,61 @@ class TestTrampolineAnalyzer:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+class TestTrampolineLandingIntegration:
+    def test_landing_payload_uses_existing_landing_event(self):
+        class FakeTracker:
+            def __init__(self):
+                self.calls = []
+
+            def landing_payload(self, ankle_px, ankle_visibility=1.0):
+                self.calls.append((ankle_px, ankle_visibility))
+                return {
+                    "bed_xy_m": [2.0, 1.0],
+                    "norm_xy": [0.5, 0.5],
+                    "zone": "center",
+                    "dist_from_center_m": 0.0,
+                    "confidence": 0.42,
+                }
+
+        tracker = FakeTracker()
+        ta = TrampolineAnalyzer(fps=30.0, bed_tracker=tracker)
+        ta.jump_detector.jump_count = 1
+        ta.jump_detector.jumps = [{"flight_frames": 12, "is_intermediate": False}]
+        ta.jump_detector.process_frame = MagicMock(return_value={
+            "event": "landing",
+            "phase": "contact",
+            "velocity": 0.2,
+            "com_y": 0.5,
+            "ankle_y": 0.7,
+        })
+        landmarks = make_landmarks_at_y(0.5, 0.7)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = ta.process_frame(frame, landmarks, frame_idx=10)
+
+        assert result["jump_count"] == 1
+        assert ta.completed_jumps[0]["landing"]["confidence"] == 0.42
+        assert tracker.calls, "landing payload should be computed only from landing event path"
+
+    def test_landing_mapping_failure_preserves_jump_result(self):
+        class FailingTracker:
+            def landing_payload(self, ankle_px, ankle_visibility=1.0):
+                raise RuntimeError("mapping failed")
+
+        ta = TrampolineAnalyzer(fps=30.0, bed_tracker=FailingTracker())
+        ta.jump_detector.jump_count = 1
+        ta.jump_detector.jumps = [{"flight_frames": 12, "is_intermediate": False}]
+        ta.jump_detector.process_frame = MagicMock(return_value={
+            "event": "landing",
+            "phase": "contact",
+            "velocity": 0.2,
+            "com_y": 0.5,
+            "ankle_y": 0.7,
+        })
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = ta.process_frame(frame, make_landmarks_at_y(0.5, 0.7), frame_idx=10)
+
+        assert result["jump_count"] == 1
+        assert "landing" not in ta.completed_jumps[0]

@@ -14,6 +14,9 @@ import sys
 import traceback
 import logging
 import uuid
+import json
+import base64
+from datetime import datetime, timezone
 import numpy as np
 
 # Set up logging
@@ -88,6 +91,93 @@ video_analyses = {}  # Store ongoing video analyses
 # Video upload limits
 MAX_VIDEO_SIZE_MB = 50  # Max 50MB video
 MAX_VIDEO_DURATION_SEC = 120  # Max 2 minutes
+TRAMPOLINE_PENDING_TTL_SECONDS = 60 * 60  # 1 hour for abandoned calibration jobs
+
+TRAMPOLINE_CORNER_ORDER = ["front_left", "front_right", "back_right", "back_left"]
+
+
+def _extract_first_frame_b64(filepath):
+    cap = cv2.VideoCapture(filepath)
+    try:
+        if not cap.isOpened():
+            return None, None, "Could not open video file"
+        ok, frame = cap.read()
+        if not ok:
+            return None, None, "Could not read first video frame"
+        ok_enc, buffer = cv2.imencode('.png', frame)
+        if not ok_enc:
+            return None, None, "Could not encode first video frame"
+        encoded = base64.b64encode(buffer).decode('ascii')
+        image_size = {"width": int(frame.shape[1]), "height": int(frame.shape[0])}
+        return encoded, image_size, None
+    finally:
+        cap.release()
+
+
+def _canonicalize_corners(corners):
+    from trampoline.bed_tracker import validate_corners
+    normalized = validate_corners(corners)
+    return [{"name": p["name"], "x": round(float(p["x"]), 3), "y": round(float(p["y"]), 3)} for p in normalized]
+
+
+def _corners_equal(a, b):
+    if not a or not b or len(a) != len(b):
+        return False
+    for pa, pb in zip(a, b):
+        if pa.get('name') != pb.get('name'):
+            return False
+        if abs(float(pa.get('x', 0)) - float(pb.get('x', 0))) > 1e-3:
+            return False
+        if abs(float(pa.get('y', 0)) - float(pb.get('y', 0))) > 1e-3:
+            return False
+    return True
+
+
+def _corners_sidecar_path(video_id):
+    return os.path.join(UPLOAD_FOLDER, f"{video_id}_corners.json")
+
+
+
+def _remove_video_artifacts(video_id, analysis, include_processed=False):
+    """Best-effort cleanup for uploaded videos, sidecars, and optional outputs."""
+    paths = [analysis.get('filepath'), _corners_sidecar_path(video_id)]
+    if include_processed:
+        paths.extend([
+            analysis.get('processed_video'),
+            os.path.join(UPLOAD_FOLDER, f"{video_id}_results.json"),
+            os.path.join(UPLOAD_FOLDER, f"{video_id}_processed.mp4"),
+        ])
+    for path in paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as exc:
+                logger.warning(f"Cleanup could not remove {path}: {exc}")
+
+
+def cleanup_expired_pending_trampoline_uploads(now=None):
+    """Expire abandoned trampoline uploads that never reached subprocess processing."""
+    now = now or time.time()
+    expired = []
+    for video_id, analysis in list(video_analyses.items()):
+        if analysis.get('mode') != 'trampoline':
+            continue
+        if analysis.get('status') not in ('uploaded_pending_calibration', 'calibration_rejected'):
+            continue
+        age = now - float(analysis.get('created_at', now))
+        if age < TRAMPOLINE_PENDING_TTL_SECONDS:
+            continue
+        _remove_video_artifacts(video_id, analysis, include_processed=True)
+        analysis.update({
+            'status': 'expired',
+            'state': 'EXPIRED',
+            'progress': 0,
+            'feedback': 'Pending trampoline calibration expired; please upload again',
+            'error': 'Pending trampoline calibration expired',
+            'filepath': None,
+        })
+        expired.append(video_id)
+    return expired
 
 def initialize_camera():
     global camera
@@ -483,6 +573,7 @@ def video_analysis():
 @app.route('/api/video/upload', methods=['POST'])
 def upload_video():
     """Upload video for analysis"""
+    cleanup_expired_pending_trampoline_uploads()
     if 'video' not in request.files:
         return jsonify({'success': False, 'error': 'No video file provided'})
     
@@ -533,9 +624,10 @@ def upload_video():
     # Initialize analysis state
     is_trampoline = (exercise_type == "trampoline")
 
+    initial_status = 'uploaded_pending_calibration' if is_trampoline else 'processing'
     video_analyses[video_id] = {
         'mode': 'trampoline' if is_trampoline else 'fitness',
-        'status': 'processing',
+        'status': initial_status,
         'progress': 0,
         'filepath': filepath,
         'exercise_type': exercise_type,
@@ -543,20 +635,43 @@ def upload_video():
         'form_score': 100,
         'avg_form_score': 100,
         'grade': 'A' if not is_trampoline else '--',
-        'state': 'READY',
-        'feedback': '',
+        'state': 'PENDING_CALIBRATION' if is_trampoline else 'READY',
+        'feedback': 'Awaiting bed corner calibration' if is_trampoline else '',
         'engine': None if is_trampoline else ExerciseEngine(),
         'total_frames': 0,
         'processed_frames': 0,
         'current_action': '--',
         'completed_jumps': [],
+        'corner_order': TRAMPOLINE_CORNER_ORDER if is_trampoline else None,
+        'corners': None,
+        'started': False,
+        'created_at': time.time(),
     }
 
     # Load exercise into engine (not used in subprocess mode, but keep for status)
     if not is_trampoline and video_analyses[video_id]['engine']:
         video_analyses[video_id]['engine'].set_exercise(exercise_type)
-    
-    # Start background processing using subprocess
+
+    if is_trampoline:
+        first_frame_b64, image_size, frame_error = _extract_first_frame_b64(filepath)
+        if frame_error:
+            video_analyses[video_id]['status'] = 'error'
+            video_analyses[video_id]['error'] = frame_error
+            return jsonify({'success': False, 'error': frame_error})
+        video_analyses[video_id]['image_size'] = image_size
+        logger.info(f"Trampoline video uploaded pending calibration: {video_id}")
+        return jsonify({
+            'success': True,
+            'video_id': video_id,
+            'status': 'uploaded_pending_calibration',
+            'message': 'Video uploaded; bed corner calibration required',
+            'first_frame_b64': first_frame_b64,
+            'first_frame_image': f"data:image/png;base64,{first_frame_b64}",
+            'image_size': image_size,
+            'corner_order': TRAMPOLINE_CORNER_ORDER,
+        })
+
+    # Start background processing using subprocess for non-trampoline mode
     thread = threading.Thread(target=process_video_subprocess, args=(video_id,))
     thread.daemon = True
     thread.start()
@@ -565,6 +680,96 @@ def upload_video():
         'success': True,
         'video_id': video_id,
         'message': 'Video uploaded, processing started'
+    })
+
+
+@app.route('/api/video/trampoline/start', methods=['POST'])
+def start_trampoline_analysis():
+    """Start trampoline analysis after first-frame bed corner calibration."""
+    cleanup_expired_pending_trampoline_uploads()
+    data = request.get_json(silent=True) or {}
+    video_id = data.get('video_id')
+    corners = data.get('corners')
+
+    analysis = video_analyses.get(video_id)
+    if not analysis:
+        return jsonify({'success': False, 'status': 'not_found', 'error': 'Video ID not found'}), 404
+    if analysis.get('mode') != 'trampoline':
+        return jsonify({'success': False, 'error': 'This endpoint is only for trampoline videos'}), 400
+
+    status = analysis.get('status')
+    existing_corners = analysis.get('corners')
+    if status == 'completed':
+        return jsonify({
+            'success': True,
+            'video_id': video_id,
+            'status': 'completed',
+            'message': 'Analysis already completed',
+            'processed_video_url': f'/api/video/processed/{video_id}' if analysis.get('processed_video') else None,
+        })
+    if status == 'processing':
+        try:
+            requested = _canonicalize_corners(corners or [])
+        except Exception:
+            requested = None
+        if requested and _corners_equal(existing_corners, requested):
+            return jsonify({
+                'success': True,
+                'video_id': video_id,
+                'status': status,
+                'message': 'Analysis already started',
+            })
+        return jsonify({'success': False, 'status': status, 'error': 'Analysis already started with different corners'}), 409
+
+    if status not in ('uploaded_pending_calibration', 'calibration_rejected'):
+        return jsonify({'success': False, 'status': status, 'error': 'Video is not ready for calibration start'}), 400
+
+    try:
+        from trampoline.bed_tracker import validate_corners
+        image_size = analysis.get('image_size')
+        image_tuple = (int(image_size['width']), int(image_size['height'])) if image_size else None
+        normalized = validate_corners(corners or [], image_size=image_tuple)
+        canonical = [{"name": p["name"], "x": float(p["x"]), "y": float(p["y"])} for p in normalized]
+    except Exception as e:
+        analysis['status'] = 'calibration_rejected'
+        analysis['state'] = 'CALIBRATION_REJECTED'
+        analysis['error'] = str(e)
+        analysis['feedback'] = str(e)
+        return jsonify({'success': False, 'status': 'calibration_rejected', 'error': str(e)}), 400
+
+    sidecar = {
+        'schema_version': 1,
+        'video_id': video_id,
+        'exercise_type': 'trampoline',
+        'frame_index': 0,
+        'image_size': analysis.get('image_size'),
+        'corner_order': TRAMPOLINE_CORNER_ORDER,
+        'corners_px': canonical,
+        'bed_dimensions_m': {'width': 4.28, 'length': 2.14},
+        'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    }
+    sidecar_path = _corners_sidecar_path(video_id)
+    tmp_path = f"{sidecar_path}.tmp"
+    with open(tmp_path, 'w') as f:
+        json.dump(sidecar, f)
+    os.replace(tmp_path, sidecar_path)
+
+    analysis['corners'] = _canonicalize_corners(canonical)
+    analysis['status'] = 'processing'
+    analysis['state'] = 'PROCESSING'
+    analysis['feedback'] = 'Processing trampoline video'
+    analysis['error'] = None
+    analysis['started'] = True
+
+    thread = threading.Thread(target=process_video_subprocess, args=(video_id,))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'video_id': video_id,
+        'status': 'processing',
+        'message': 'Trampoline analysis started',
     })
 
 def process_video_subprocess(video_id):
@@ -696,16 +901,15 @@ def process_video_subprocess(video_id):
         else:
             analysis['status'] = 'error'
             err_text = stderr or stdout or f"Subprocess exited with code {process.returncode}"
-            analysis['error'] = f"Subprocess failed: {stderr.decode()}"
-            logger.error(f"Subprocess error: {stderr.decode()}")
+            analysis['error'] = f"Subprocess failed: {err_text}"
+            logger.error(f"Subprocess error: {err_text}")
         
         # Cleanup JSON file (keep processed video for download)
         try:
             if os.path.exists(output_json_path):
                 os.remove(output_json_path)
-            # Delete original video (keep processed one)
-            if os.path.exists(analysis['filepath']):
-                os.remove(analysis['filepath'])
+            # Delete original video and calibration sidecar (keep processed one)
+            _remove_video_artifacts(video_id, analysis, include_processed=False)
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
             
@@ -741,6 +945,7 @@ def get_processed_video(video_id):
 @app.route('/api/video/status/<video_id>', methods=['GET'])
 def get_video_status(video_id):
     """Get video analysis status"""
+    cleanup_expired_pending_trampoline_uploads()
     analysis = video_analyses.get(video_id)
     
     if not analysis:

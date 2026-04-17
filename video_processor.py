@@ -227,6 +227,7 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
     if is_trampoline:
         from trampoline.analyzer import TrampolineAnalyzer
         from trampoline.overlay import draw_trampoline_overlay, draw_angle_arcs
+        from trampoline.bed_tracker import BedTracker, load_corners_sidecar
     else:
         from exercises.engine import ExerciseEngine
 
@@ -343,8 +344,36 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         
         # Initialize analysis engine
         if is_trampoline:
-            analyzer = TrampolineAnalyzer(fps=fps)
-            print(f"Trampoline analyzer initialized (fps={fps:.1f})")
+            bed_tracker = None
+            video_id = os.path.basename(output_json_path).replace('_results.json', '')
+            corners_json = os.path.join(os.path.dirname(output_json_path), f"{video_id}_corners.json")
+            if os.path.exists(corners_json):
+                try:
+                    sidecar = load_corners_sidecar(corners_json, expected_video_id=video_id)
+                    bed_tracker = BedTracker.from_sidecar(sidecar)
+                    cap_peek = cv2.VideoCapture(video_path)
+                    ok_first, first_frame = cap_peek.read()
+                    cap_peek.release()
+                    if ok_first:
+                        bed_tracker.initialize(first_frame, frame_index=1)
+                        print(f"Bed tracker initialized from {corners_json}")
+                    else:
+                        results['status'] = 'error'
+                        results['error'] = 'Could not read first frame for bed tracker initialization'
+                        save_results()
+                        print(f"Error: {results['error']}")
+                        return
+                except Exception as e:
+                    results['status'] = 'error'
+                    results['error'] = f"Invalid trampoline corners sidecar: {e}"
+                    save_results()
+                    print(f"Error: {results['error']}")
+                    return
+            else:
+                print(f"No trampoline corners sidecar found at {corners_json}; landing payload disabled")
+
+            analyzer = TrampolineAnalyzer(fps=fps, bed_tracker=bed_tracker)
+            print(f"Trampoline analyzer initialized (fps={fps:.1f}, bed_tracker={'on' if bed_tracker else 'off'})")
         else:
             engine = ExerciseEngine()
             if not engine.set_exercise(exercise_type):
@@ -372,6 +401,9 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
             'velocity': 0,
             'trunk_thigh_angle': 0,
             'thigh_shin_angle': 0,
+            'bed_info': None,
+            'latest_landing': None,
+            'landings': [],
         }
 
         while cap.isOpened():
@@ -381,6 +413,13 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
 
             frame_count += 1
             results['progress'] = int((frame_count / total_frames) * 100)
+
+            # Bed tracking must run for every decoded frame, independent of sampled analyzer cadence.
+            if is_trampoline and getattr(analyzer, 'bed_tracker', None) is not None:
+                try:
+                    current_stats['bed_info'] = analyzer.bed_tracker.update(frame, frame_index=frame_count)
+                except Exception as e:
+                    current_stats['bed_info'] = {'success': False, 'message': str(e)}
 
             # Process with MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -409,6 +448,9 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
                         current_stats['form_score'] = 100
                         current_stats['grade'] = '--'
                         current_stats['feedback'] = f"Phase: {tramp_result['phase']}"
+                        current_stats['bed_info'] = getattr(analyzer.bed_tracker, 'current_info', current_stats.get('bed_info')) if getattr(analyzer, 'bed_tracker', None) is not None else current_stats.get('bed_info')
+                        current_stats['landings'] = [j.get('landing') for j in tramp_result.get('completed_jumps', []) if j.get('landing')]
+                        current_stats['latest_landing'] = current_stats['landings'][-1] if current_stats['landings'] else None
 
                         results['reps'] = tramp_result['jump_count']
                         results['current_action'] = tramp_result['current_action']
@@ -443,7 +485,7 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
 
             # Draw stats overlay
             if is_trampoline:
-                frame = draw_trampoline_overlay(frame, current_stats)
+                frame = draw_trampoline_overlay(frame, current_stats, current_stats.get('bed_info'))
             else:
                 frame = draw_stats_overlay(frame, current_stats)
             

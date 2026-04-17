@@ -758,3 +758,54 @@
     color: #333;
     border-color: #999;
 }
+
+/* Trampoline corner calibration */
+.corner-marking-step {
+    background: #fff;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding: 15px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.corner-marking-step.hidden { display: none; }
+
+.corner-marking-step h3 {
+    margin: 0 0 8px;
+    color: #333;
+}
+
+.corner-instruction {
+    color: #555;
+    margin: 0 0 10px;
+}
+
+#corner-canvas {
+    width: 100%;
+    max-height: 500px;
+    object-fit: contain;
+    background: #111;
+    border-radius: 8px;
+    cursor: crosshair;
+}
+
+.corner-status {
+    margin-top: 8px;
+    color: #555;
+    font-weight: 600;
+}
+
+.corner-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.corner-actions .btn {
+    flex: 1;
+}
+
+.landing-low-confidence {
+    color: #e67e22;
+    font-weight: 700;
+}

@@ -41,6 +41,19 @@
                     <canvas id="analysis-canvas" hidden></canvas>
                 </div>
 
+                <div class="corner-marking-step hidden" id="corner-marking-step">
+                    <h3>床面四角标定</h3>
+                    <p class="corner-instruction">请按 <strong>前左 → 前右 → 后右 → 后左</strong> 顺序点击 4 个床面角。</p>
+                    <canvas id="corner-canvas"></canvas>
+                    <div class="corner-status">
+                        已选择：<span id="corner-count">0/4</span>
+                    </div>
+                    <div class="corner-actions">
+                        <button class="btn" id="reset-corners" type="button">重置角点</button>
+                        <button class="btn primary-btn" id="confirm-corners" type="button" disabled>开始分析</button>
+                    </div>
+                </div>
+
                 <div class="video-controls">
                     <div class="progress-container">
                         <div class="progress-bar" id="analysis-progress">
