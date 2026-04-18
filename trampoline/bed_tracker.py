@@ -1056,6 +1056,13 @@ class BedTracker:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         frame_index = frame_index if frame_index is not None else ((self._frame_index or -1) + 1)
         self._frame_index = frame_index
+        if manual_info is not None:
+            pts = self._detect_features(gray)
+            if pts is not None:
+                self._prev_pts = pts
+            self._prev_gray = gray
+            return self._attach_marker_lines(frame_bgr, manual_info)
+
         success = False
         relocalization_attempted = False
         inlier_ratio = 0.0
