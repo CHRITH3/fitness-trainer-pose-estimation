@@ -103,6 +103,8 @@ def draw_trampoline_overlay(frame, stats, bed_info=None):
             bed_info.get("tracking_state"),
             bed_info.get("message"),
         )
+        marker_lines = bed_info.get("marker_lines") or (bed_info.get("diagnostics") or {}).get("marker_lines")
+        draw_marker_lines(frame, marker_lines)
     latest_landing = stats.get("latest_landing")
     if latest_landing:
         draw_landing_marker(frame, latest_landing.get("ankle_px"), latest_landing, latest_landing.get("zone"))
@@ -149,6 +151,28 @@ def draw_bed_quad(frame, corners, confidence=None, tracking_state=None, message=
     return frame
 
 
+def draw_marker_lines(frame, marker_lines):
+    """Draw best-effort detected trampoline marker lines with distinct styling."""
+    if not marker_lines:
+        return frame
+    h, w = frame.shape[:2]
+    ref = min(w, h)
+    thickness = max(2, int(3 * ref / _REF_W))
+    for idx, line in enumerate(marker_lines):
+        try:
+            p1 = line.get("p1") or line.get("start")
+            p2 = line.get("p2") or line.get("end")
+            x1, y1 = int(round(float(p1[0]))), int(round(float(p1[1])))
+            x2, y2 = int(round(float(p2[0]))), int(round(float(p2[1])))
+        except (TypeError, ValueError, IndexError, AttributeError):
+            continue
+        color = (255, 255, 0) if idx % 2 == 0 else (255, 0, 255)  # cyan / magenta in BGR
+        cv2.line(frame, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
+        cv2.circle(frame, (x1, y1), max(2, thickness), color, -1, cv2.LINE_AA)
+        cv2.circle(frame, (x2, y2), max(2, thickness), color, -1, cv2.LINE_AA)
+    return frame
+
+
 def draw_landing_marker(frame, ankle_px, landing, zone=None):
     """Draw a cross marker at the ankle pixel for the latest landing."""
     if not ankle_px or len(ankle_px) < 2:
@@ -170,21 +194,40 @@ def draw_landing_marker(frame, ankle_px, landing, zone=None):
 
 
 def draw_bed_minimap(frame, landings):
-    """Draw a compact top-down landing map in the lower-right corner."""
+    """Draw an adaptive top-down landing map in the lower-right corner."""
     if not landings:
         return frame
     h, w = frame.shape[:2]
-    box_w, box_h = 150, 85
-    margin = 15
-    x0, y0 = w - box_w - margin, h - box_h - margin
+    ref = min(w, h)
+
+    def sx(v):
+        return max(1, int(round(v * ref / _REF_W)))
+
+    box_w = int(np.clip(sx(180), 130, min(360, max(80, w - 2 * sx(10)))))
+    box_h = int(np.clip(round(box_w * 0.58), 78, min(210, max(60, h - 2 * sx(10)))))
+    margin = int(np.clip(sx(15), 8, 32))
+    x0 = max(0, w - box_w - margin)
+    y0 = max(0, h - box_h - margin)
+    box_w = min(box_w, w - x0)
+    box_h = min(box_h, h - y0)
+    if box_w <= 20 or box_h <= 20:
+        return frame
+
     overlay = frame.copy()
     cv2.rectangle(overlay, (x0, y0), (x0 + box_w, y0 + box_h), (25, 25, 25), -1)
     cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
-    pad = 12
-    rect = (x0 + pad, y0 + pad, box_w - 2 * pad, box_h - 2 * pad)
-    cv2.rectangle(frame, (rect[0], rect[1]), (rect[0] + rect[2], rect[1] + rect[3]), (180, 180, 180), 1)
-    cv2.line(frame, (rect[0] + rect[2] // 2, rect[1]), (rect[0] + rect[2] // 2, rect[1] + rect[3]), (90, 90, 90), 1)
-    cv2.line(frame, (rect[0], rect[1] + rect[3] // 2), (rect[0] + rect[2], rect[1] + rect[3] // 2), (90, 90, 90), 1)
+
+    pad = int(np.clip(sx(14), 8, max(8, box_h // 4)))
+    title_h = sx(14)
+    rect = (x0 + pad, y0 + pad, max(1, box_w - 2 * pad), max(1, box_h - 2 * pad - title_h))
+    line_th = max(1, sx(1))
+    grid_th = max(1, sx(1))
+    point_r = int(np.clip(sx(4), 3, 8))
+    font_sc = float(np.clip(0.35 * ref / _REF_W, 0.32, 0.7))
+
+    cv2.rectangle(frame, (rect[0], rect[1]), (rect[0] + rect[2], rect[1] + rect[3]), (180, 180, 180), line_th)
+    cv2.line(frame, (rect[0] + rect[2] // 2, rect[1]), (rect[0] + rect[2] // 2, rect[1] + rect[3]), (90, 90, 90), grid_th)
+    cv2.line(frame, (rect[0], rect[1] + rect[3] // 2), (rect[0] + rect[2], rect[1] + rect[3] // 2), (90, 90, 90), grid_th)
     for landing in landings[-20:]:
         norm = landing.get("norm_xy") if isinstance(landing, dict) else None
         if not norm or len(norm) < 2:
@@ -195,10 +238,9 @@ def draw_bed_minimap(frame, landings):
         py = int(rect[1] + ny * rect[3])
         conf = float(landing.get("confidence", 1.0))
         color = (0, 230, 118) if conf >= 0.6 else (0, 190, 255) if conf >= 0.35 else (0, 0, 255)
-        cv2.circle(frame, (px, py), 3, color, -1, cv2.LINE_AA)
-    cv2.putText(frame, "Landings", (x0 + pad, y0 + box_h - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (210, 210, 210), 1, cv2.LINE_AA)
+        cv2.circle(frame, (px, py), point_r, color, -1, cv2.LINE_AA)
+    cv2.putText(frame, "Landings", (x0 + pad, min(h - 4, y0 + box_h - sx(5))), cv2.FONT_HERSHEY_SIMPLEX, font_sc, (210, 210, 210), line_th, cv2.LINE_AA)
     return frame
-
 
 def draw_angle_arcs(frame, landmarks):
     """
