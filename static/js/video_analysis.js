@@ -50,7 +50,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const cornerCtx = cornerCanvas ? cornerCanvas.getContext('2d') : null;
     const cornerCount = document.getElementById('corner-count');
     const resetCornersBtn = document.getElementById('reset-corners');
+    const saveKeyframeBtn = document.getElementById('save-keyframe');
+    const addKeyframeBtn = document.getElementById('add-keyframe');
     const confirmCornersBtn = document.getElementById('confirm-corners');
+    const keyframeListEl = document.getElementById('keyframe-list');
+    const currentKeyframeLabel = document.getElementById('current-keyframe-label');
     const calibrationGeometry = window.TrampolineCalibrationGeometry;
 
     // LLM Elements
@@ -72,6 +76,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let cornerImageSize = null;
     let cornerContentRect = null;
     let cornerPoints = [];
+    let calibrationKeyframes = [];
+    let activeKeyframeFrame = null;
+    let pendingFrameImage = null;
+    let uploadedFrameRate = 30;
     const cornerOrder = ['front_left', 'front_right', 'back_right', 'back_left'];
     const cornerLabels = ['前左', '前右', '后右', '后左'];
     let llmEventSource = null;
@@ -272,6 +280,9 @@ document.addEventListener('DOMContentLoaded', function() {
         cornerContentRect = null;
         cornerImageSize = null;
         cornerPoints = [];
+        calibrationKeyframes = [];
+        activeKeyframeFrame = null;
+        pendingFrameImage = null;
         pendingTrampolineVideoId = null;
         videoFile = null;
 
@@ -348,7 +359,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     isAnalyzing = false;
                     stopAnalysisBtn.disabled = true;
                     addLog('Trampoline calibration required before analysis starts.', 'info');
-                    addFeedback('info', '请在首帧上标记床面四角后开始分析');
+                    addFeedback('info', '请在视频预览中添加一个或多个关键帧标定后开始分析');
                     setupCornerCanvas(data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`, data.video_id);
                 } else {
                     addLog('Initializing pose estimation engine...', 'processing');

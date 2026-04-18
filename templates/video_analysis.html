@@ -42,16 +42,22 @@
                 </div>
 
                 <div class="corner-marking-step hidden" id="corner-marking-step">
-                    <h3>床面四角标定</h3>
-                    <p class="corner-instruction">请按 <strong>前左 → 前右 → 后右 → 后左</strong> 顺序点击 4 个床面角。</p>
+                    <h3>床面关键帧补标</h3>
+                    <p class="corner-instruction">分析开始前可播放/暂停/拖动视频，在当前帧按 <strong>前左 → 前右 → 后右 → 后左</strong> 顺序点击 4 个床面角；后端分析不会中途暂停等待补标。</p>
+                    <div class="corner-toolbar">
+                        <button class="btn" id="add-keyframe" type="button">添加当前帧标定</button>
+                        <span id="current-keyframe-label">未选择关键帧</span>
+                    </div>
                     <canvas id="corner-canvas"></canvas>
                     <div class="corner-status">
-                        已选择：<span id="corner-count">0/4</span>
+                        当前关键帧角点：<span id="corner-count">0/4</span>
                     </div>
                     <div class="corner-actions">
-                        <button class="btn" id="reset-corners" type="button">重置角点</button>
-                        <button class="btn primary-btn" id="confirm-corners" type="button" disabled>开始分析</button>
+                        <button class="btn" id="reset-corners" type="button">重置当前角点</button>
+                        <button class="btn" id="save-keyframe" type="button" disabled>保存/更新关键帧</button>
+                        <button class="btn primary-btn" id="confirm-corners" type="button" disabled>提交标定并开始分析</button>
                     </div>
+                    <div class="keyframe-list" id="keyframe-list"></div>
                 </div>
 
                 <div class="video-controls">
