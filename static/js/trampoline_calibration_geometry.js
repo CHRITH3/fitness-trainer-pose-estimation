@@ -73,9 +73,36 @@
         };
     }
 
+    function frameIndexFromTime(timeS, fps) {
+        const t = Number(timeS);
+        const f = Number(fps);
+        if (!Number.isFinite(t) || t < 0 || !Number.isFinite(f) || f <= 0) {
+            return 0;
+        }
+        return Math.max(0, Math.round(t * f));
+    }
+
+    function buildCalibrationPayload(keyframes) {
+        if (!Array.isArray(keyframes)) return [];
+        return keyframes
+            .filter(kf => kf && Array.isArray(kf.corners_px) && kf.corners_px.length === 4)
+            .map(kf => ({
+                frame_index: Math.max(0, Math.round(Number(kf.frame_index) || 0)),
+                time_s: Math.max(0, Number(kf.time_s) || 0),
+                corners_px: kf.corners_px.map((pt, idx) => ({
+                    name: pt.name || ['front_left', 'front_right', 'back_right', 'back_left'][idx],
+                    x: Number(pt.x),
+                    y: Number(pt.y),
+                })),
+            }))
+            .sort((a, b) => a.frame_index - b.frame_index);
+    }
+
     return {
         computeContainRect,
         displayToImagePoint,
         imageToDisplayPoint,
+        frameIndexFromTime,
+        buildCalibrationPayload,
     };
 });
