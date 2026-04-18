@@ -801,7 +801,7 @@ def start_trampoline_analysis():
     analysis['calibrations'] = calibrations
     analysis['status'] = 'processing'
     analysis['state'] = 'PROCESSING'
-    analysis['feedback'] = f"Processing trampoline video with {len(canonical_calibrations)} calibration(s)"
+    analysis['feedback'] = f"Processing trampoline video with {len(calibrations)} calibration(s)"
     analysis['error'] = None
     analysis['started'] = True
 
