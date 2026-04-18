@@ -114,9 +114,9 @@ def _extract_first_frame_b64(filepath):
         cap.release()
 
 
-def _canonicalize_corners(corners):
+def _canonicalize_corners(corners, image_size=None):
     from trampoline.bed_tracker import validate_corners
-    normalized = validate_corners(corners)
+    normalized = validate_corners(corners, image_size=image_size)
     return [{"name": p["name"], "x": round(float(p["x"]), 3), "y": round(float(p["y"]), 3)} for p in normalized]
 
 
@@ -129,6 +129,39 @@ def _corners_equal(a, b):
         if abs(float(pa.get('x', 0)) - float(pb.get('x', 0))) > 1e-3:
             return False
         if abs(float(pa.get('y', 0)) - float(pb.get('y', 0))) > 1e-3:
+            return False
+    return True
+
+
+def _canonicalize_calibrations_payload(data, image_size=None):
+    from trampoline.bed_tracker import normalize_calibrations
+    if data.get('calibrations') is not None:
+        calibrations = data.get('calibrations')
+    else:
+        calibrations = [{
+            'frame_index': 0,
+            'time_s': 0.0,
+            'corners_px': data.get('corners') or [],
+        }]
+    normalized = normalize_calibrations(calibrations, image_size=image_size)
+    for calibration in normalized:
+        calibration['corners_px'] = _canonicalize_corners(calibration.get('corners_px') or [], image_size=image_size)
+        if calibration.get('time_s') is not None:
+            calibration['time_s'] = round(float(calibration['time_s']), 3)
+    return normalized
+
+
+def _calibrations_equal(a, b):
+    if not a or not b or len(a) != len(b):
+        return False
+    for ca, cb in zip(a, b):
+        if int(ca.get('frame_index', -1)) != int(cb.get('frame_index', -2)):
+            return False
+        ta = ca.get('time_s')
+        tb = cb.get('time_s')
+        if ta is not None and tb is not None and abs(float(ta) - float(tb)) > 1e-3:
+            return False
+        if not _corners_equal(ca.get('corners_px'), cb.get('corners_px')):
             return False
     return True
 
@@ -685,11 +718,10 @@ def upload_video():
 
 @app.route('/api/video/trampoline/start', methods=['POST'])
 def start_trampoline_analysis():
-    """Start trampoline analysis after first-frame bed corner calibration."""
+    """Start trampoline analysis after pre-analysis bed keyframe calibration."""
     cleanup_expired_pending_trampoline_uploads()
     data = request.get_json(silent=True) or {}
     video_id = data.get('video_id')
-    corners = data.get('corners')
 
     analysis = video_analyses.get(video_id)
     if not analysis:
@@ -697,8 +729,11 @@ def start_trampoline_analysis():
     if analysis.get('mode') != 'trampoline':
         return jsonify({'success': False, 'error': 'This endpoint is only for trampoline videos'}), 400
 
+    image_size = analysis.get('image_size')
+    image_tuple = (int(image_size['width']), int(image_size['height'])) if image_size else None
     status = analysis.get('status')
-    existing_corners = analysis.get('corners')
+    existing_calibrations = analysis.get('calibrations')
+
     if status == 'completed':
         return jsonify({
             'success': True,
@@ -709,27 +744,23 @@ def start_trampoline_analysis():
         })
     if status == 'processing':
         try:
-            requested = _canonicalize_corners(corners or [])
+            requested = _canonicalize_calibrations_payload(data, image_size=image_tuple)
         except Exception:
             requested = None
-        if requested and _corners_equal(existing_corners, requested):
+        if requested and _calibrations_equal(existing_calibrations, requested):
             return jsonify({
                 'success': True,
                 'video_id': video_id,
                 'status': status,
                 'message': 'Analysis already started',
             })
-        return jsonify({'success': False, 'status': status, 'error': 'Analysis already started with different corners'}), 409
+        return jsonify({'success': False, 'status': status, 'error': 'Analysis already started with different calibration keyframes'}), 409
 
     if status not in ('uploaded_pending_calibration', 'calibration_rejected'):
         return jsonify({'success': False, 'status': status, 'error': 'Video is not ready for calibration start'}), 400
 
     try:
-        from trampoline.bed_tracker import validate_corners
-        image_size = analysis.get('image_size')
-        image_tuple = (int(image_size['width']), int(image_size['height'])) if image_size else None
-        normalized = validate_corners(corners or [], image_size=image_tuple)
-        canonical = [{"name": p["name"], "x": float(p["x"]), "y": float(p["y"])} for p in normalized]
+        calibrations = _canonicalize_calibrations_payload(data, image_size=image_tuple)
     except Exception as e:
         analysis['status'] = 'calibration_rejected'
         analysis['state'] = 'CALIBRATION_REJECTED'
@@ -737,14 +768,17 @@ def start_trampoline_analysis():
         analysis['feedback'] = str(e)
         return jsonify({'success': False, 'status': 'calibration_rejected', 'error': str(e)}), 400
 
+    first = calibrations[0]
     sidecar = {
         'schema_version': 1,
         'video_id': video_id,
         'exercise_type': 'trampoline',
-        'frame_index': 0,
+        'frame_index': int(first['frame_index']),
+        'time_s': first.get('time_s'),
         'image_size': analysis.get('image_size'),
         'corner_order': TRAMPOLINE_CORNER_ORDER,
-        'corners_px': canonical,
+        'corners_px': first['corners_px'],
+        'calibrations': calibrations,
         'bed_dimensions_m': {'width': 4.28, 'length': 2.14},
         'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     }
@@ -754,7 +788,8 @@ def start_trampoline_analysis():
         json.dump(sidecar, f)
     os.replace(tmp_path, sidecar_path)
 
-    analysis['corners'] = _canonicalize_corners(canonical)
+    analysis['calibrations'] = calibrations
+    analysis['corners'] = first['corners_px']
     analysis['status'] = 'processing'
     analysis['state'] = 'PROCESSING'
     analysis['feedback'] = 'Processing trampoline video'

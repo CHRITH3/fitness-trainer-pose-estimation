@@ -302,7 +302,7 @@ def load_corners_sidecar(path: str, expected_video_id: Optional[str] = None) -> 
     with open(path, "r") as f:
         data = json.load(f)
 
-    required = [
+    base_required = [
         "schema_version",
         "video_id",
         "exercise_type",
@@ -311,7 +311,7 @@ def load_corners_sidecar(path: str, expected_video_id: Optional[str] = None) -> 
         "bed_dimensions_m",
         "created_at",
     ]
-    missing = [key for key in required if key not in data]
+    missing = [key for key in base_required if key not in data]
     if missing:
         raise BedTrackerValidationError(f"Corners sidecar missing required fields: {', '.join(missing)}")
     if data.get("schema_version") not in (1, 2):
@@ -336,35 +336,25 @@ def load_corners_sidecar(path: str, expected_video_id: Optional[str] = None) -> 
     if not data.get("created_at"):
         raise BedTrackerValidationError("Corners sidecar created_at is required")
 
-    calibrations = data.get("calibrations")
-    if calibrations is None:
-        legacy_required = ["frame_index", "corners_px"]
-        missing_legacy = [key for key in legacy_required if key not in data]
-        if missing_legacy:
-            raise BedTrackerValidationError(f"Corners sidecar missing required fields: {', '.join(missing_legacy)}")
-        try:
-            frame_index = int(data.get("frame_index"))
-        except (TypeError, ValueError) as exc:
-            raise BedTrackerValidationError("Corners sidecar frame_index must be an integer") from exc
-        if frame_index != 0:
-            raise BedTrackerValidationError("Corners sidecar must describe first-frame calibration (frame_index=0)")
-        calibrations = [{
-            "frame_index": 0,
-            "time_s": data.get("time_s", 0.0),
-            "corners_px": data.get("corners_px", []),
-        }]
-        data["calibrations"] = normalize_calibrations(calibrations, image_size=size)
-        data["frame_index"] = 0
+    if data.get("calibrations") is not None:
+        data["calibrations"] = normalize_calibrations(data.get("calibrations") or [], image_size=size)
     else:
-        data["calibrations"] = normalize_calibrations(calibrations, image_size=size)
-        earliest = data["calibrations"][0]
-        data["frame_index"] = earliest["frame_index"]
-        data["corners_px"] = earliest["corners_px"]
-        if earliest.get("time_s") is not None:
-            data["time_s"] = earliest["time_s"]
+        legacy_required = ["frame_index", "corners_px"]
+        missing = [key for key in legacy_required if key not in data]
+        if missing:
+            raise BedTrackerValidationError(f"Corners sidecar missing required fields: {', '.join(missing)}")
+        frame_index = _coerce_frame_index(data.get("frame_index"))
+        if frame_index != 0:
+            raise BedTrackerValidationError("Legacy corners sidecar must describe first-frame calibration (frame_index=0)")
+        data["calibrations"] = normalize_calibrations(
+            [{"frame_index": frame_index, "time_s": data.get("time_s", 0.0), "corners_px": data.get("corners_px", [])}],
+            image_size=size,
+        )
 
+    first = data["calibrations"][0]
+    data["frame_index"] = int(first["frame_index"])
+    data["corners_px"] = first["corners_px"]
     return data
-
 
 def classify_landing_zone(
     bed_xy_m: Sequence[float],
