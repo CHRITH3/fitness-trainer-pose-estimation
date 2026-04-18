@@ -1,6 +1,7 @@
 """API lifecycle tests for trampoline two-stage calibration."""
 
 import io
+import json
 import os
 
 import cv2
@@ -102,3 +103,45 @@ def test_pending_trampoline_cleanup_expires_abandoned_upload(tmp_path):
     assert app_module.video_analyses["orphan"]["status"] == "expired"
     assert not video_path.exists()
     assert not sidecar_path.exists()
+
+
+def test_multi_keyframe_start_writes_sorted_calibrations(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+    later = valid_corners()
+    later = [{**p, "x": p["x"] + 1, "y": p["y"] + 1} for p in later]
+
+    response = client.post("/api/video/trampoline/start", json={
+        "video_id": video_id,
+        "calibrations": [
+            {"frame_index": 30, "time_s": 1.0, "corners_px": later},
+            {"frame_index": 0, "time_s": 0.0, "corners_px": valid_corners()},
+        ],
+    })
+
+    payload = response.get_json()
+    assert response.status_code == 200, payload
+    assert payload["success"]
+    assert payload["calibration_count"] == 2
+    with open(os.path.join(app_module.UPLOAD_FOLDER, f"{video_id}_corners.json")) as f:
+        sidecar = json.load(f)
+    assert sidecar["schema_version"] == 2
+    assert [c["frame_index"] for c in sidecar["calibrations"]] == [0, 30]
+
+
+def test_duplicate_keyframe_rejected_without_processing(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+
+    response = client.post("/api/video/trampoline/start", json={
+        "video_id": video_id,
+        "calibrations": [
+            {"frame_index": 4, "corners_px": valid_corners()},
+            {"frame_index": 4, "corners_px": valid_corners()},
+        ],
+    })
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["status"] == "calibration_rejected"
+    assert app_module.video_analyses[video_id]["status"] == "calibration_rejected"

@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
+from trampoline.overlay import draw_bed_minimap, draw_marker_lines
 from trampoline.bed_tracker import (
     BedTracker,
     BedTrackerValidationError,
@@ -244,3 +245,91 @@ def test_update_without_orb_keyframe_degrades_instead_of_returning_none():
     assert info["tracking_state"] in {"frozen", "tracking_lost"}
     assert info["tracking_confidence"] < 0.6
     assert "no_keyframe" in info["diagnostics"]["reasons"]
+
+
+def shifted_corners(dx=20, dy=0):
+    return [{**p, "x": p["x"] + dx, "y": p["y"] + dy} for p in RECT_CORNERS]
+
+
+def test_extended_sidecar_loads_multiple_calibrations(tmp_path):
+    path = tmp_path / "vid_corners.json"
+    path.write_text(json.dumps({
+        "schema_version": 2,
+        "video_id": "vid",
+        "exercise_type": "trampoline",
+        "frame_index": 0,
+        "image_size": {"width": 640, "height": 480},
+        "corner_order": ["front_left", "front_right", "back_right", "back_left"],
+        "corners_px": RECT_CORNERS,
+        "calibrations": [
+            {"frame_index": 20, "time_s": 0.66, "corners_px": shifted_corners(20)},
+            {"frame_index": 0, "time_s": 0.0, "corners_px": RECT_CORNERS},
+        ],
+        "bed_dimensions_m": {"width": 4.28, "length": 2.14},
+        "created_at": "2026-04-18T00:00:00Z",
+    }))
+
+    parsed = load_corners_sidecar(str(path), expected_video_id="vid")
+    tracker = BedTracker.from_sidecar(parsed)
+
+    assert [c["frame_index"] for c in parsed["calibrations"]] == [0, 20]
+    assert len(tracker.manual_calibrations) == 2
+
+
+def test_manual_keyframe_transition_applies_smoothly():
+    frame = textured_frame()
+    tracker = BedTracker(
+        RECT_CORNERS,
+        bed_size_m=(4.0, 2.0),
+        image_size=(640, 480),
+        calibrations=[
+            {"frame_index": 0, "time_s": 0, "corners_px": RECT_CORNERS},
+            {"frame_index": 20, "time_s": 0.66, "corners_px": shifted_corners(20)},
+        ],
+    )
+    tracker.initialize(frame, frame_index=0)
+
+    info = tracker.update(frame, frame_index=1)
+    assert info["diagnostics"]["source"] == "manual_keyframe"
+    assert 0 < info["diagnostics"]["transition_progress"] < 1
+    assert 0 < np.max(np.array(info["corners"]) - np.array([[p["x"], p["y"]] for p in RECT_CORNERS])) < 20
+
+    info = tracker.update(frame, frame_index=20)
+    assert info["diagnostics"]["source"] == "manual_keyframe"
+    assert np.allclose(np.array(info["corners"]), np.array([[p["x"], p["y"]] for p in shifted_corners(20)]), atol=1)
+
+
+def test_marker_line_detection_and_overlay_safe():
+    frame = textured_frame()
+    cv2.line(frame, (120, 200), (480, 200), (255, 255, 255), 4)
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    tracker.initialize(frame, frame_index=0)
+
+    lines = tracker.current_info["diagnostics"].get("marker_lines", [])
+    assert lines
+    before = frame.copy()
+    draw_marker_lines(frame, lines)
+    assert np.count_nonzero(cv2.absdiff(before, frame)) > 0
+
+
+def test_blank_marker_line_detection_is_safe():
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    info = tracker.initialize(frame, frame_index=0)
+    assert info["diagnostics"].get("marker_lines") == []
+
+
+def test_adaptive_minimap_scales_on_high_resolution_and_bounds_small():
+    landings = [{"norm_xy": [0.5, 0.5], "confidence": 0.9}]
+    high = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    draw_bed_minimap(high, landings)
+    ys, xs = np.nonzero(np.any(high != 0, axis=2))
+    assert xs.max() - xs.min() > 150
+    assert ys.max() < high.shape[0] and xs.max() < high.shape[1]
+
+    small = np.zeros((240, 320, 3), dtype=np.uint8)
+    draw_bed_minimap(small, landings)
+    ys, xs = np.nonzero(np.any(small != 0, axis=2))
+    assert ys.size > 0
+    assert ys.min() >= 0 and xs.min() >= 0
+    assert ys.max() < small.shape[0] and xs.max() < small.shape[1]

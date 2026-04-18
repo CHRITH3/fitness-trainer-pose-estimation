@@ -52,6 +52,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const resetCornersBtn = document.getElementById('reset-corners');
     const saveKeyframeBtn = document.getElementById('save-keyframe');
     const addKeyframeBtn = document.getElementById('add-keyframe');
+    const keyframeList = document.getElementById('keyframe-list');
+    const currentKeyframeLabel = document.getElementById('current-keyframe-label');
     const confirmCornersBtn = document.getElementById('confirm-corners');
     const addCalibrationFrameBtn = document.getElementById('add-calibration-frame');
     const deleteCalibrationBtn = document.getElementById('delete-calibration');
@@ -80,10 +82,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let cornerImageSize = null;
     let cornerContentRect = null;
     let cornerPoints = [];
-    let trampolineCalibrations = [];
-    let activeCalibrationId = null;
-    let draftCalibrationMeta = null;
-    let trampolineVideoMeta = null;
+    let calibrationKeyframes = [];
+    let activeKeyframe = null;
     const cornerOrder = ['front_left', 'front_right', 'back_right', 'back_left'];
     const cornerLabels = ['前左', '前右', '后右', '后左'];
     let llmEventSource = null;
@@ -285,8 +285,8 @@ document.addEventListener('DOMContentLoaded', function() {
         cornerImageSize = null;
         cornerPoints = [];
         calibrationKeyframes = [];
-        activeKeyframeFrame = null;
-        pendingFrameImage = null;
+        activeKeyframe = null;
+        renderKeyframeList();
         pendingTrampolineVideoId = null;
         videoFile = null;
 
@@ -363,7 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     isAnalyzing = false;
                     stopAnalysisBtn.disabled = true;
                     addLog('Trampoline calibration required before analysis starts.', 'info');
-                    addFeedback('info', '请在视频预览中添加一个或多个关键帧标定后开始分析');
+                    addFeedback('info', '请预览/暂停视频，在一个或多个关键帧标记床面四角后开始分析');
                     setupCornerCanvas(data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`, data.video_id);
                 } else {
                     addLog('Initializing pose estimation engine...', 'processing');
@@ -517,15 +517,26 @@ document.addEventListener('DOMContentLoaded', function() {
         analysisCanvas.hidden = true;
         calibrationKeyframes = [];
         cornerPoints = [];
+        calibrationKeyframes = [];
+        activeKeyframe = null;
         cornerContentRect = null;
         cornerImageSize = null;
         pendingFrameImage = imageSrc;
         pendingTrampolineVideoId = videoId;
         if (cornerCount) cornerCount.textContent = '0/4';
-        if (confirmCornersBtn) confirmCornersBtn.disabled = true;
         if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
-        setDraftImageFromDataUrl(imageSrc, 0, 0);
+        if (confirmCornersBtn) confirmCornersBtn.disabled = true;
+        if (currentKeyframeLabel) currentKeyframeLabel.textContent = '当前帧 0（0.00s）';
         renderKeyframeList();
+
+        cornerImage = new Image();
+        cornerImage.onload = function() {
+            updateCornerCanvasSize();
+            setActiveKeyframeFromVideo(0, 0);
+            drawCornerCanvas();
+        };
+        cornerImage.src = imageSrc;
+        pendingTrampolineVideoId = videoId;
     }
 
     function drawCornerCanvas() {
@@ -610,31 +621,84 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function estimateCurrentFrameIndex() {
+        // Browser APIs expose time reliably; store frame_index as a best-effort 30fps estimate and preserve time_s too.
+        return Math.max(0, Math.round((Number(videoPlayer.currentTime) || 0) * 30));
+    }
+
+    function setActiveKeyframeFromVideo(frameIndex = null, timeS = null) {
+        const idx = frameIndex === null ? estimateCurrentFrameIndex() : frameIndex;
+        const t = timeS === null ? (Number(videoPlayer.currentTime) || 0) : timeS;
+        activeKeyframe = { frameIndex: Math.max(0, Math.round(idx)), timeS: Math.max(0, t) };
+        const existing = calibrationKeyframes.find(k => k.frameIndex === activeKeyframe.frameIndex);
+        cornerPoints = existing ? existing.corners.map(p => ({ ...p })) : [];
+        if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
+        if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
+        if (currentKeyframeLabel) currentKeyframeLabel.textContent = `当前帧 ${activeKeyframe.frameIndex}（${activeKeyframe.timeS.toFixed(2)}s）`;
+        drawCornerCanvas();
+        renderKeyframeList();
+    }
+
+    function renderKeyframeList() {
+        if (!keyframeList) return;
+        keyframeList.innerHTML = '';
+        const payload = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
+            ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes)
+            : [];
+        if (confirmCornersBtn) confirmCornersBtn.disabled = payload.length < 1;
+        calibrationKeyframes.slice().sort((a, b) => a.frameIndex - b.frameIndex).forEach(kf => {
+            const item = document.createElement('div');
+            item.className = `keyframe-item ${activeKeyframe && activeKeyframe.frameIndex === kf.frameIndex ? 'active' : ''}`;
+            item.innerHTML = `<span>帧 ${kf.frameIndex} · ${kf.timeS.toFixed(2)}s · ${kf.corners.length}/4</span>`;
+            const actions = document.createElement('div');
+            actions.className = 'keyframe-item-actions';
+            const edit = document.createElement('button');
+            edit.className = 'btn';
+            edit.type = 'button';
+            edit.textContent = '重标';
+            edit.addEventListener('click', () => setActiveKeyframeFromVideo(kf.frameIndex, kf.timeS));
+            const del = document.createElement('button');
+            del.className = 'btn';
+            del.type = 'button';
+            del.textContent = '删除';
+            del.addEventListener('click', () => {
+                calibrationKeyframes = calibrationKeyframes.filter(item => item.frameIndex !== kf.frameIndex);
+                if (activeKeyframe && activeKeyframe.frameIndex === kf.frameIndex) cornerPoints = [];
+                renderKeyframeList();
+                drawCornerCanvas();
+            });
+            actions.append(edit, del);
+            item.appendChild(actions);
+            keyframeList.appendChild(item);
+        });
+    }
+
+    if (addKeyframeBtn) {
+        addKeyframeBtn.addEventListener('click', () => {
+            videoPlayer.pause();
+            setActiveKeyframeFromVideo();
+            addFeedback('info', '已暂停，请在当前帧点击四个床面角点');
+        });
+    }
+
     if (saveKeyframeBtn) {
         saveKeyframeBtn.addEventListener('click', () => {
-            if (activeKeyframeFrame === null || cornerPoints.length !== 4) return;
-            const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
-            const keyframe = {
-                frame_index: activeKeyframeFrame,
-                time_s: timeS,
-                corners_px: cornerPoints.map((pt, idx) => ({ name: cornerOrder[idx], x: pt.x, y: pt.y })),
-            };
-            calibrationKeyframes = calibrationKeyframes.filter(kf => kf.frame_index !== activeKeyframeFrame);
-            calibrationKeyframes.push(keyframe);
-            calibrationKeyframes.sort((a, b) => a.frame_index - b.frame_index);
-            addLog(`Saved calibration keyframe ${formatKeyframe(keyframe)}.`, 'success');
+            if (!activeKeyframe || cornerPoints.length !== 4) return;
+            const saved = { ...activeKeyframe, corners: cornerPoints.map(p => ({ ...p })) };
+            calibrationKeyframes = calibrationKeyframes.filter(k => k.frameIndex !== saved.frameIndex);
+            calibrationKeyframes.push(saved);
+            calibrationKeyframes.sort((a, b) => a.frameIndex - b.frameIndex);
             renderKeyframeList();
+            addLog(`Saved trampoline calibration keyframe ${saved.frameIndex}.`, 'success');
         });
     }
 
     if (confirmCornersBtn) {
         confirmCornersBtn.addEventListener('click', async () => {
-            const calibrations = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
-                ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes)
-                : calibrationKeyframes;
+            const calibrations = calibrationGeometry && calibrationGeometry.buildCalibrationPayload ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes) : [];
             if (!pendingTrampolineVideoId || calibrations.length < 1) return;
             confirmCornersBtn.disabled = true;
-            addLog(`Submitting ${calibrations.length} bed calibration keyframe(s)...`, 'processing');
+            addLog('Submitting bed keyframe calibrations...', 'processing');
             try {
                 const response = await fetch('/api/video/trampoline/start', {
                     method: 'POST',
@@ -648,7 +712,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     confirmCornersBtn.disabled = false;
                     return;
                 }
-                addLog('Calibration accepted. Starting frame-by-frame analysis...', 'success');
+                addLog(`Calibration accepted (${calibrations.length} keyframe(s)). Starting frame-by-frame analysis...`, 'success');
                 addFeedback('success', 'Calibration accepted. Processing...');
                 if (cornerStep) cornerStep.classList.add('hidden');
                 videoPlayer.hidden = false;
