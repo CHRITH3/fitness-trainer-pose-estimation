@@ -53,8 +53,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const saveKeyframeBtn = document.getElementById('save-keyframe');
     const addKeyframeBtn = document.getElementById('add-keyframe');
     const confirmCornersBtn = document.getElementById('confirm-corners');
-    const keyframeListEl = document.getElementById('keyframe-list');
-    const currentKeyframeLabel = document.getElementById('current-keyframe-label');
+    const addCalibrationFrameBtn = document.getElementById('add-calibration-frame');
+    const deleteCalibrationBtn = document.getElementById('delete-calibration');
+    const startTrampolineAnalysisBtn = document.getElementById('start-trampoline-analysis');
+    const calibrationList = document.getElementById('calibration-list');
+    const calibrationDraftLabel = document.getElementById('calibration-draft-label');
+    const calibrationStatusText = document.getElementById('calibration-status-text');
     const calibrationGeometry = window.TrampolineCalibrationGeometry;
 
     // LLM Elements
@@ -76,10 +80,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let cornerImageSize = null;
     let cornerContentRect = null;
     let cornerPoints = [];
-    let calibrationKeyframes = [];
-    let activeKeyframeFrame = null;
-    let pendingFrameImage = null;
-    let uploadedFrameRate = 30;
+    let trampolineCalibrations = [];
+    let activeCalibrationId = null;
+    let draftCalibrationMeta = null;
+    let trampolineVideoMeta = null;
     const cornerOrder = ['front_left', 'front_right', 'back_right', 'back_left'];
     const cornerLabels = ['前左', '前右', '后右', '后左'];
     let llmEventSource = null;

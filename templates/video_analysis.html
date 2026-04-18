@@ -42,20 +42,26 @@
                 </div>
 
                 <div class="corner-marking-step hidden" id="corner-marking-step">
-                    <h3>预分析关键帧床面标定</h3>
-                    <p class="corner-instruction">先暂停/拖动原视频，再点击“添加当前帧标定”。每个关键帧请按 <strong>前左 → 前右 → 后右 → 后左</strong> 顺序点击 4 个床面角；后台分析只会在全部标定提交后启动。</p>
-                    <div class="keyframe-controls">
-                        <button class="btn" id="add-keyframe" type="button">添加当前帧标定</button>
-                        <span id="current-keyframe-label">未选择关键帧</span>
+                    <h3>床面四角标定</h3>
+                    <p class="corner-instruction">先用上方视频预览定位到目标帧，再点击“添加当前帧标定”。每个标定都在分析开始前一次性提交，不会在后端处理中暂停。</p>
+                    <div class="corner-toolbar">
+                        <button class="btn" id="add-calibration-frame" type="button">➕ 添加当前帧标定</button>
+                        <button class="btn" id="delete-calibration" type="button" disabled>🗑️ 删除所选标定</button>
+                        <button class="btn primary-btn" id="start-trampoline-analysis" type="button" disabled>开始分析</button>
                     </div>
+                    <div class="calibration-meta">
+                        <span id="calibration-draft-label">当前草稿：首帧</span>
+                        <span id="calibration-status-text">至少保存 1 个有效标定后才能开始分析。</span>
+                    </div>
+                    <div class="calibration-list" id="calibration-list"></div>
+                    <p class="corner-instruction">当前草稿请按 <strong>前左 → 前右 → 后右 → 后左</strong> 顺序点击 4 个床面角。</p>
                     <canvas id="corner-canvas"></canvas>
                     <div class="corner-status">
                         当前关键帧已选择：<span id="corner-count">0/4</span>
                     </div>
                     <div class="corner-actions">
-                        <button class="btn" id="reset-corners" type="button">重置当前角点</button>
-                        <button class="btn" id="save-keyframe" type="button" disabled>保存/重标关键帧</button>
-                        <button class="btn primary-btn" id="confirm-corners" type="button" disabled>提交标定并开始分析</button>
+                        <button class="btn" id="reset-corners" type="button">重置角点</button>
+                        <button class="btn primary-btn" id="confirm-corners" type="button" disabled>保存/更新当前标定</button>
                     </div>
                     <div class="keyframe-list" id="keyframe-list"></div>
                 </div>

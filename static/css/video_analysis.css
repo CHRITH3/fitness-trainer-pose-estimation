@@ -780,6 +780,55 @@
     margin: 0 0 10px;
 }
 
+.corner-toolbar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 12px 0 8px;
+}
+
+.corner-toolbar .btn {
+    flex: 1 1 180px;
+}
+
+.calibration-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 0.92rem;
+    color: #444;
+    margin-bottom: 10px;
+}
+
+.calibration-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.calibration-chip {
+    border: 1px solid #d0d7de;
+    border-radius: 999px;
+    background: #f6f8fa;
+    color: #333;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.calibration-chip.active {
+    border-color: #3498db;
+    background: #e8f4fc;
+    color: #0b5cab;
+    font-weight: 600;
+}
+
+.calibration-chip.complete {
+    border-color: #27ae60;
+}
+
 #corner-canvas {
     width: 100%;
     height: auto;
