@@ -73,14 +73,23 @@
         };
     }
 
+    function frameIndexFromTime(timeS, fps) {
+        const safeTime = Math.max(0, Number(timeS) || 0);
+        const safeFps = validPositive(Number(fps)) ? Number(fps) : 30;
+        return Math.max(0, Math.round(safeTime * safeFps));
+    }
+
     function buildCalibrationPayload(keyframes) {
         if (!Array.isArray(keyframes)) return [];
         return keyframes
-            .filter(frame => frame && Array.isArray(frame.corners) && frame.corners.length === 4)
+            .filter(frame => {
+                const corners = frame && (Array.isArray(frame.corners) ? frame.corners : frame.corners_px);
+                return frame && Array.isArray(corners) && corners.length === 4;
+            })
             .map(frame => ({
-                frame_index: Math.max(0, Math.round(Number(frame.frameIndex) || 0)),
-                time_s: Math.max(0, Number(frame.timeS) || 0),
-                corners_px: frame.corners.map((corner, idx) => ({
+                frame_index: Math.max(0, Math.round(Number(frame.frameIndex ?? frame.frame_index) || 0)),
+                time_s: Math.max(0, Number(frame.timeS ?? frame.time_s) || 0),
+                corners_px: (Array.isArray(frame.corners) ? frame.corners : frame.corners_px).map((corner, idx) => ({
                     name: corner.name || ['front_left', 'front_right', 'back_right', 'back_left'][idx],
                     x: Number(corner.x),
                     y: Number(corner.y),
@@ -93,6 +102,7 @@
         computeContainRect,
         displayToImagePoint,
         imageToDisplayPoint,
+        frameIndexFromTime,
         buildCalibrationPayload,
     };
 });

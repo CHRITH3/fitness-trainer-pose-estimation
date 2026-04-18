@@ -520,12 +520,9 @@ class BedTracker:
         self.bed_size_m = bed_size_m or (cfg.BED_WIDTH_M, cfg.BED_LENGTH_M)
         self.image_size = image_size
 
-        default_calibrations = calibrations or [{"frame_index": 0, "time_s": 0.0, "corners_px": corners_image}]
-        self.manual_calibrations = validate_calibrations(default_calibrations, image_size=image_size)
         normalized = validate_corners(corners_image, image_size=image_size)
-        self.manual_calibrations = normalize_calibrations(
-            calibrations if calibrations is not None else [{"frame_index": 0, "time_s": 0.0, "corners_px": normalized}],
-            image_size=image_size,
+        self.manual_calibrations = self._normalize_manual_calibrations(
+            calibrations if calibrations is not None else [{"frame_index": 0, "time_s": 0.0, "corners_px": normalized}]
         )
         self.initial_corners = _calibration_corners_array(self.manual_calibrations[0])
         self.current_corners = self.initial_corners.copy()
@@ -549,7 +546,6 @@ class BedTracker:
         self._keyframe_descriptors = None
         self._last_relocalize_frame = 0
         self._next_manual_anchor_idx = 1
-        self._active_transition: Optional[Dict[str, Any]] = None
         self._marker_lines: List[Dict[str, Any]] = []
         self.current_info = BedTrackerInfo(
             success=False,
@@ -569,6 +565,9 @@ class BedTracker:
         if not normalized:
             raise BedTrackerValidationError("At least one calibration is required")
         return normalized
+
+    def _processing_frame_for_calibration(self, calibration: Dict[str, Any]) -> int:
+        return max(0, int(calibration.get("frame_index", 0)))
 
     @classmethod
     def from_sidecar(cls, sidecar: Dict[str, Any]) -> "BedTracker":
@@ -963,14 +962,15 @@ class BedTracker:
                 gray,
                 frame_index,
                 target_corners,
-                source="manual_anchor",
+                source="manual_keyframe",
                 message="manual keyframe anchor applied",
                 confidence=1.0,
                 diagnostics={
-                    "source": "manual_anchor",
+                    "source": "manual_keyframe",
                     "accepted": True,
                     "target_frame_index": target_frame,
                     "time_s": anchor.get("time_s"),
+                    "transition_progress": 1.0,
                 },
                 refresh_keyframe=True,
             )
@@ -998,17 +998,17 @@ class BedTracker:
             source="manual_transition",
         )
         diagnostics.update({
-            "source": "manual_transition",
+            "source": "manual_keyframe",
             "target_frame_index": target_frame,
             "time_s": anchor.get("time_s"),
-            "progress": round(progress, 4),
+            "transition_progress": round(progress, 4),
         })
         if diagnostics["accepted"]:
             return self._apply_manual_corners(
                 gray,
                 frame_index,
                 interpolated,
-                source="manual_transition",
+                source="manual_keyframe",
                 message="manual keyframe transition",
                 confidence=0.92,
                 diagnostics=diagnostics,
@@ -1019,14 +1019,15 @@ class BedTracker:
             gray,
             frame_index,
             target_corners,
-            source="manual_anchor_fallback",
+            source="manual_keyframe",
             message="manual keyframe fallback applied",
             confidence=0.45,
             diagnostics={
-                "source": "manual_anchor_fallback",
+                "source": "manual_keyframe",
                 "accepted": True,
                 "target_frame_index": target_frame,
                 "time_s": anchor.get("time_s"),
+                "transition_progress": 1.0,
                 "fallback_reasons": diagnostics.get("reasons", []),
             },
             refresh_keyframe=True,
@@ -1044,7 +1045,7 @@ class BedTracker:
         if state == TRACKING_LOST or confidence < 0.2:
             self._marker_lines = []
         else:
-            self._marker_lines = detect_marker_lines(frame_bgr, self.current_corners, max_lines=getattr(self.config, "BED_MARKER_LINE_MAX_LINES", 6))
+            self._marker_lines = detect_marker_lines(frame_bgr, self.current_corners, self.config)
         self.current_info["marker_lines"] = list(self._marker_lines)
         diagnostics = dict(self.current_info.get("diagnostics") or {})
         diagnostics["marker_line_count"] = len(self._marker_lines)
@@ -1059,13 +1060,6 @@ class BedTracker:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         frame_index = frame_index if frame_index is not None else ((self._frame_index or -1) + 1)
         self._frame_index = frame_index
-        if manual_info is not None:
-            pts = self._detect_features(gray)
-            if pts is not None:
-                self._prev_pts = pts
-            self._prev_gray = gray
-            return self._attach_marker_lines(frame_bgr, manual_info)
-
         success = False
         relocalization_attempted = False
         inlier_ratio = 0.0
