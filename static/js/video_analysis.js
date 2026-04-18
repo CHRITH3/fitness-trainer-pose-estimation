@@ -383,6 +383,109 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
 
+    function estimateFrameIndex() {
+        const fps = uploadedFrameRate || 30;
+        if (calibrationGeometry && calibrationGeometry.frameIndexFromTime) {
+            return calibrationGeometry.frameIndexFromTime(videoPlayer.currentTime || 0, fps);
+        }
+        return Math.max(0, Math.round((videoPlayer.currentTime || 0) * fps));
+    }
+
+    function formatKeyframe(kf) {
+        const time = Number(kf.time_s || 0).toFixed(2);
+        return `F${kf.frame_index} / ${time}s`;
+    }
+
+    function setDraftImageFromDataUrl(imageSrc, frameIndex, timeS) {
+        if (!cornerStep || !cornerCanvas || !cornerCtx) return;
+        cornerImage = new Image();
+        cornerImage.onload = function() {
+            updateCornerCanvasSize();
+            drawCornerCanvas();
+        };
+        cornerImage.src = imageSrc;
+        activeKeyframeFrame = frameIndex;
+        const existing = calibrationKeyframes.find(kf => kf.frame_index === frameIndex);
+        cornerPoints = existing ? existing.corners_px.map(pt => ({ ...pt })) : [];
+        if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
+        if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
+        if (currentKeyframeLabel) currentKeyframeLabel.textContent = `当前关键帧：F${frameIndex} / ${Number(timeS || 0).toFixed(2)}s`;
+    }
+
+    function captureCurrentVideoFrame() {
+        if (!videoPlayer.videoWidth || !videoPlayer.videoHeight) {
+            return pendingFrameImage;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = videoPlayer.videoWidth;
+        canvas.height = videoPlayer.videoHeight;
+        const tmpCtx = canvas.getContext('2d');
+        tmpCtx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/png');
+    }
+
+    function addCalibrationAtCurrentFrame() {
+        if (!pendingTrampolineVideoId) return;
+        videoPlayer.pause();
+        videoPlayer.hidden = false;
+        const frameIndex = estimateFrameIndex();
+        const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
+        const imageSrc = captureCurrentVideoFrame();
+        if (!imageSrc) {
+            addFeedback('warning', '视频帧尚未准备好，请播放或稍等后再添加标定');
+            return;
+        }
+        pendingFrameImage = imageSrc;
+        setDraftImageFromDataUrl(imageSrc, frameIndex, timeS);
+        addLog(`Editing trampoline calibration keyframe F${frameIndex} (${timeS.toFixed(2)}s).`, 'info');
+    }
+
+    function renderKeyframeList() {
+        if (!keyframeListEl) return;
+        const payload = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
+            ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes)
+            : calibrationKeyframes.slice().sort((a, b) => a.frame_index - b.frame_index);
+        keyframeListEl.innerHTML = '';
+        if (!payload.length) {
+            keyframeListEl.innerHTML = '<div class="keyframe-empty">尚未保存关键帧；至少保存 1 个后才能开始分析。</div>';
+        } else {
+            payload.forEach(kf => {
+                const row = document.createElement('div');
+                row.className = 'keyframe-row';
+                row.innerHTML = `<span>${formatKeyframe(kf)} · ${kf.corners_px.length}/4</span>`;
+                const actions = document.createElement('div');
+                actions.className = 'keyframe-row-actions';
+                const relabel = document.createElement('button');
+                relabel.type = 'button';
+                relabel.className = 'btn small-btn';
+                relabel.textContent = '重标';
+                relabel.addEventListener('click', () => {
+                    videoPlayer.currentTime = Number(kf.time_s || 0);
+                    setDraftImageFromDataUrl(pendingFrameImage || captureCurrentVideoFrame(), kf.frame_index, kf.time_s);
+                });
+                const del = document.createElement('button');
+                del.type = 'button';
+                del.className = 'btn small-btn danger-btn';
+                del.textContent = '删除';
+                del.addEventListener('click', () => {
+                    calibrationKeyframes = calibrationKeyframes.filter(item => item.frame_index !== kf.frame_index);
+                    if (activeKeyframeFrame === kf.frame_index) {
+                        cornerPoints = [];
+                        if (cornerCount) cornerCount.textContent = '0/4';
+                        if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
+                        drawCornerCanvas();
+                    }
+                    renderKeyframeList();
+                });
+                actions.appendChild(relabel);
+                actions.appendChild(del);
+                row.appendChild(actions);
+                keyframeListEl.appendChild(row);
+            });
+        }
+        if (confirmCornersBtn) confirmCornersBtn.disabled = payload.length < 1;
+    }
+
     function updateCornerCanvasSize() {
         if (!cornerCanvas || !cornerImage || !calibrationGeometry) return;
         const parentWidth = cornerStep ? cornerStep.clientWidth : 0;
@@ -406,21 +509,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!cornerStep || !cornerCanvas || !cornerCtx) return;
         cornerStep.classList.remove('hidden');
         videoPlayer.pause();
-        videoPlayer.hidden = true;
+        videoPlayer.hidden = false;
         analysisCanvas.hidden = true;
+        calibrationKeyframes = [];
         cornerPoints = [];
         cornerContentRect = null;
         cornerImageSize = null;
+        pendingFrameImage = imageSrc;
+        pendingTrampolineVideoId = videoId;
         if (cornerCount) cornerCount.textContent = '0/4';
         if (confirmCornersBtn) confirmCornersBtn.disabled = true;
-
-        cornerImage = new Image();
-        cornerImage.onload = function() {
-            updateCornerCanvasSize();
-            drawCornerCanvas();
-        };
-        cornerImage.src = imageSrc;
-        pendingTrampolineVideoId = videoId;
+        if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
+        setDraftImageFromDataUrl(imageSrc, 0, 0);
+        renderKeyframeList();
     }
 
     function drawCornerCanvas() {
@@ -481,7 +582,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             cornerPoints.push({ name: cornerOrder[cornerPoints.length], x: imagePoint.x, y: imagePoint.y });
             if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
-            if (confirmCornersBtn) confirmCornersBtn.disabled = cornerPoints.length !== 4;
+            if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
             drawCornerCanvas();
         });
     }
@@ -492,25 +593,49 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    if (addKeyframeBtn) {
+        addKeyframeBtn.addEventListener('click', addCalibrationAtCurrentFrame);
+    }
+
     if (resetCornersBtn) {
         resetCornersBtn.addEventListener('click', () => {
             cornerPoints = [];
             if (cornerCount) cornerCount.textContent = '0/4';
-            if (confirmCornersBtn) confirmCornersBtn.disabled = true;
+            if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
             drawCornerCanvas();
+        });
+    }
+
+    if (saveKeyframeBtn) {
+        saveKeyframeBtn.addEventListener('click', () => {
+            if (activeKeyframeFrame === null || cornerPoints.length !== 4) return;
+            const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
+            const keyframe = {
+                frame_index: activeKeyframeFrame,
+                time_s: timeS,
+                corners_px: cornerPoints.map((pt, idx) => ({ name: cornerOrder[idx], x: pt.x, y: pt.y })),
+            };
+            calibrationKeyframes = calibrationKeyframes.filter(kf => kf.frame_index !== activeKeyframeFrame);
+            calibrationKeyframes.push(keyframe);
+            calibrationKeyframes.sort((a, b) => a.frame_index - b.frame_index);
+            addLog(`Saved calibration keyframe ${formatKeyframe(keyframe)}.`, 'success');
+            renderKeyframeList();
         });
     }
 
     if (confirmCornersBtn) {
         confirmCornersBtn.addEventListener('click', async () => {
-            if (!pendingTrampolineVideoId || cornerPoints.length !== 4) return;
+            const calibrations = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
+                ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes)
+                : calibrationKeyframes;
+            if (!pendingTrampolineVideoId || calibrations.length < 1) return;
             confirmCornersBtn.disabled = true;
-            addLog('Submitting bed corner calibration...', 'processing');
+            addLog(`Submitting ${calibrations.length} bed calibration keyframe(s)...`, 'processing');
             try {
                 const response = await fetch('/api/video/trampoline/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ video_id: pendingTrampolineVideoId, corners: cornerPoints })
+                    body: JSON.stringify({ video_id: pendingTrampolineVideoId, calibrations })
                 });
                 const data = await response.json();
                 if (!data.success) {
