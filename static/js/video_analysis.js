@@ -411,6 +411,9 @@ document.addEventListener('DOMContentLoaded', function() {
         activeKeyframeFrame = frameIndex;
         const existing = calibrationKeyframes.find(kf => kf.frame_index === frameIndex);
         cornerPoints = existing ? existing.corners_px.map(pt => ({ ...pt })) : [];
+        if (existing && existing.preview_image) {
+            pendingFrameImage = existing.preview_image;
+        }
         if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
         if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
         if (currentKeyframeLabel) currentKeyframeLabel.textContent = `当前关键帧：F${frameIndex} / ${Number(timeS || 0).toFixed(2)}s`;
@@ -446,14 +449,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderKeyframeList() {
         if (!keyframeListEl) return;
+        const sortedKeyframes = calibrationKeyframes.slice().sort((a, b) => a.frame_index - b.frame_index);
         const payload = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
-            ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes)
-            : calibrationKeyframes.slice().sort((a, b) => a.frame_index - b.frame_index);
+            ? calibrationGeometry.buildCalibrationPayload(sortedKeyframes)
+            : sortedKeyframes;
         keyframeListEl.innerHTML = '';
-        if (!payload.length) {
+        if (!sortedKeyframes.length) {
             keyframeListEl.innerHTML = '<div class="keyframe-empty">尚未保存关键帧；至少保存 1 个后才能开始分析。</div>';
         } else {
-            payload.forEach(kf => {
+            sortedKeyframes.forEach(kf => {
                 const row = document.createElement('div');
                 row.className = 'keyframe-row';
                 row.innerHTML = `<span>${formatKeyframe(kf)} · ${kf.corners_px.length}/4</span>`;
@@ -464,8 +468,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 relabel.className = 'btn small-btn';
                 relabel.textContent = '重标';
                 relabel.addEventListener('click', () => {
+                    videoPlayer.pause();
                     videoPlayer.currentTime = Number(kf.time_s || 0);
-                    setDraftImageFromDataUrl(pendingFrameImage || captureCurrentVideoFrame(), kf.frame_index, kf.time_s);
+                    setDraftImageFromDataUrl(kf.preview_image || pendingFrameImage || captureCurrentVideoFrame(), kf.frame_index, kf.time_s);
                 });
                 const del = document.createElement('button');
                 del.type = 'button';
@@ -523,6 +528,7 @@ document.addEventListener('DOMContentLoaded', function() {
         cornerImageSize = null;
         pendingFrameImage = imageSrc;
         pendingTrampolineVideoId = videoId;
+        uploadedFrameRate = Number(videoPlayer.dataset.fps || uploadedFrameRate || 30);
         if (cornerCount) cornerCount.textContent = '0/4';
         if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
         if (confirmCornersBtn) confirmCornersBtn.disabled = true;
@@ -712,11 +718,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (saveKeyframeBtn) {
         saveKeyframeBtn.addEventListener('click', () => {
-            if (!activeKeyframe || cornerPoints.length !== 4) return;
-            const saved = { ...activeKeyframe, imageSrc: activeKeyframe.imageSrc || (cornerImage ? cornerImage.src : null), corners: cornerPoints.map(p => ({ ...p })) };
-            calibrationKeyframes = calibrationKeyframes.filter(k => k.frameIndex !== saved.frameIndex);
-            calibrationKeyframes.push(saved);
-            calibrationKeyframes.sort((a, b) => a.frameIndex - b.frameIndex);
+            if (activeKeyframeFrame === null || cornerPoints.length !== 4) return;
+            const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
+            const keyframe = {
+                frame_index: activeKeyframeFrame,
+                time_s: timeS,
+                preview_image: captureCurrentVideoFrame() || pendingFrameImage,
+                corners_px: cornerPoints.map((pt, idx) => ({ name: cornerOrder[idx], x: pt.x, y: pt.y })),
+            };
+            calibrationKeyframes = calibrationKeyframes.filter(kf => kf.frame_index !== activeKeyframeFrame);
+            calibrationKeyframes.push(keyframe);
+            calibrationKeyframes.sort((a, b) => a.frame_index - b.frame_index);
+            addLog(`Saved calibration keyframe ${formatKeyframe(keyframe)}.`, 'success');
             renderKeyframeList();
             addLog(`Saved trampoline calibration keyframe ${saved.frameIndex}.`, 'success');
         });

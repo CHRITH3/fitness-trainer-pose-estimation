@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import geometry from '../static/js/trampoline_calibration_geometry.js';
 
-const { computeContainRect, displayToImagePoint, imageToDisplayPoint, buildCalibrationPayload } = geometry;
+const {
+    computeContainRect,
+    displayToImagePoint,
+    imageToDisplayPoint,
+    frameIndexFromTime,
+    buildCalibrationPayload,
+} = geometry;
 
 function approx(actual, expected, tolerance = 1) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} not within ${tolerance} of ${expected}`);
@@ -43,22 +49,31 @@ function approx(actual, expected, tolerance = 1) {
     approx(roundTrip.y, original.y);
 }
 
-// Keyframe payload builder sorts and serializes original-pixel corners.
+// Keyframe frame-index helper is stable and non-negative.
 {
-    const corners = [
-        { name: 'front_left', x: 10, y: 90 },
-        { name: 'front_right', x: 90, y: 90 },
-        { name: 'back_right', x: 90, y: 10 },
-        { name: 'back_left', x: 10, y: 10 },
-    ];
+    assert.equal(frameIndexFromTime(0, 30), 0);
+    assert.equal(frameIndexFromTime(2.4, 30), 72);
+    assert.equal(frameIndexFromTime(-1, 30), 0);
+}
+
+// Keyframe payload builder sorts and normalizes complete drafts only.
+{
     const payload = buildCalibrationPayload([
-        { frameIndex: 45, timeS: 1.5, corners },
-        { frameIndex: 0, timeS: 0, corners },
+        { frame_index: 90, time_s: 3, corners_px: [
+            { x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 }, { x: 7, y: 8 },
+        ] },
+        { frame_index: 15, time_s: 0.5, corners_px: [
+            { name: 'front_left', x: 9, y: 10 },
+            { name: 'front_right', x: 11, y: 12 },
+            { name: 'back_right', x: 13, y: 14 },
+            { name: 'back_left', x: 15, y: 16 },
+        ] },
+        { frame_index: 120, time_s: 4, corners_px: [{ x: 0, y: 0 }] },
     ]);
     assert.equal(payload.length, 2);
-    assert.equal(payload[0].frame_index, 0);
-    assert.equal(payload[1].frame_index, 45);
-    assert.deepEqual(payload[1].corners_px.map(p => p.name), ['front_left', 'front_right', 'back_right', 'back_left']);
+    assert.deepEqual(payload.map(item => item.frame_index), [15, 90]);
+    assert.equal(payload[1].corners_px[0].name, 'front_left');
+    assert.equal(payload[1].corners_px[3].name, 'back_left');
 }
 
 console.log('trampoline calibration geometry tests passed');
