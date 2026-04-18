@@ -425,11 +425,6 @@ def detect_marker_lines(
     kept.sort(key=lambda item: (item["score"], item["length"]), reverse=True)
     return kept[:max_lines]
 
-    first = data["calibrations"][0]
-    data["frame_index"] = int(first["frame_index"])
-    data["corners_px"] = first["corners_px"]
-    return data
-
 def classify_landing_zone(
     bed_xy_m: Sequence[float],
     bed_size_m: Tuple[float, float] = None,
@@ -520,6 +515,8 @@ class BedTracker:
         self.bed_size_m = bed_size_m or (cfg.BED_WIDTH_M, cfg.BED_LENGTH_M)
         self.image_size = image_size
 
+        default_calibrations = calibrations or [{"frame_index": 0, "time_s": 0.0, "corners_px": corners_image}]
+        self.manual_calibrations = validate_calibrations(default_calibrations, image_size=image_size)
         normalized = validate_corners(corners_image, image_size=image_size)
         self.manual_calibrations = self._normalize_manual_calibrations(
             calibrations if calibrations is not None else [{"frame_index": 0, "time_s": 0.0, "corners_px": normalized}]
@@ -546,6 +543,7 @@ class BedTracker:
         self._keyframe_descriptors = None
         self._last_relocalize_frame = 0
         self._next_manual_anchor_idx = 1
+        self._active_transition: Optional[Dict[str, Any]] = None
         self._marker_lines: List[Dict[str, Any]] = []
         self.current_info = BedTrackerInfo(
             success=False,
@@ -962,15 +960,14 @@ class BedTracker:
                 gray,
                 frame_index,
                 target_corners,
-                source="manual_keyframe",
+                source="manual_anchor",
                 message="manual keyframe anchor applied",
                 confidence=1.0,
                 diagnostics={
-                    "source": "manual_keyframe",
+                    "source": "manual_anchor",
                     "accepted": True,
                     "target_frame_index": target_frame,
                     "time_s": anchor.get("time_s"),
-                    "transition_progress": 1.0,
                 },
                 refresh_keyframe=True,
             )
@@ -998,17 +995,17 @@ class BedTracker:
             source="manual_transition",
         )
         diagnostics.update({
-            "source": "manual_keyframe",
+            "source": "manual_transition",
             "target_frame_index": target_frame,
             "time_s": anchor.get("time_s"),
-            "transition_progress": round(progress, 4),
+            "progress": round(progress, 4),
         })
         if diagnostics["accepted"]:
             return self._apply_manual_corners(
                 gray,
                 frame_index,
                 interpolated,
-                source="manual_keyframe",
+                source="manual_transition",
                 message="manual keyframe transition",
                 confidence=0.92,
                 diagnostics=diagnostics,
@@ -1019,15 +1016,14 @@ class BedTracker:
             gray,
             frame_index,
             target_corners,
-            source="manual_keyframe",
+            source="manual_anchor_fallback",
             message="manual keyframe fallback applied",
             confidence=0.45,
             diagnostics={
-                "source": "manual_keyframe",
+                "source": "manual_anchor_fallback",
                 "accepted": True,
                 "target_frame_index": target_frame,
                 "time_s": anchor.get("time_s"),
-                "transition_progress": 1.0,
                 "fallback_reasons": diagnostics.get("reasons", []),
             },
             refresh_keyframe=True,
@@ -1045,7 +1041,7 @@ class BedTracker:
         if state == TRACKING_LOST or confidence < 0.2:
             self._marker_lines = []
         else:
-            self._marker_lines = detect_marker_lines(frame_bgr, self.current_corners, self.config)
+            self._marker_lines = detect_marker_lines(frame_bgr, self.current_corners, max_lines=getattr(self.config, "BED_MARKER_LINE_MAX_LINES", 6))
         self.current_info["marker_lines"] = list(self._marker_lines)
         diagnostics = dict(self.current_info.get("diagnostics") or {})
         diagnostics["marker_line_count"] = len(self._marker_lines)
