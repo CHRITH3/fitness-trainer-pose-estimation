@@ -133,37 +133,50 @@ def _corners_equal(a, b):
     return True
 
 
-def _canonicalize_calibrations_payload(data, image_size=None):
-    from trampoline.bed_tracker import normalize_calibrations
-    if data.get('calibrations') is not None:
-        calibrations = data.get('calibrations')
-    else:
-        calibrations = [{
-            'frame_index': 0,
-            'time_s': 0.0,
-            'corners_px': data.get('corners') or [],
-        }]
-    normalized = normalize_calibrations(calibrations, image_size=image_size)
-    for calibration in normalized:
-        calibration['corners_px'] = _canonicalize_corners(calibration.get('corners_px') or [], image_size=image_size)
-        if calibration.get('time_s') is not None:
-            calibration['time_s'] = round(float(calibration['time_s']), 3)
-    return normalized
+def _canonicalize_calibrations(calibrations, image_size=None):
+    from trampoline.bed_tracker import validate_calibrations
+    normalized = validate_calibrations(calibrations or [], image_size=image_size)
+    canonical = []
+    for item in normalized:
+        entry = {
+            'frame_index': int(item['frame_index']),
+            'corners_px': _canonicalize_corners(item['corners_px'], image_size=image_size),
+        }
+        if item.get('time_s') is not None:
+            entry['time_s'] = round(float(item['time_s']), 3)
+        if item.get('label'):
+            entry['label'] = str(item['label'])
+        canonical.append(entry)
+    return canonical
 
 
 def _calibrations_equal(a, b):
     if not a or not b or len(a) != len(b):
         return False
     for ca, cb in zip(a, b):
-        if int(ca.get('frame_index', -1)) != int(cb.get('frame_index', -2)):
+        if int(ca.get('frame_index', -1)) != int(cb.get('frame_index', -1)):
             return False
         ta = ca.get('time_s')
         tb = cb.get('time_s')
-        if ta is not None and tb is not None and abs(float(ta) - float(tb)) > 1e-3:
+        if ta is None and tb is None:
+            pass
+        elif ta is None or tb is None or abs(float(ta) - float(tb)) > 1e-3:
             return False
-        if not _corners_equal(ca.get('corners_px'), cb.get('corners_px')):
+        if not _corners_equal(ca.get('corners_px') or [], cb.get('corners_px') or []):
             return False
     return True
+
+
+def _normalize_trampoline_calibrations(payload, image_size=None):
+    calibrations = payload.get('calibrations')
+    if calibrations is None:
+        corners = payload.get('corners')
+        calibrations = [{
+            'frame_index': 0,
+            'time_s': 0.0,
+            'corners_px': corners or [],
+        }]
+    return _canonicalize_calibrations(calibrations, image_size=image_size)
 
 
 def _corners_sidecar_path(video_id):
@@ -639,14 +652,16 @@ def upload_video():
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     video_file.save(filepath)
     
-    # Check video duration
+    # Check video duration / metadata
+    fps = 30.0
+    frame_count = 0
     cap = cv2.VideoCapture(filepath)
     if cap.isOpened():
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30
-        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-        duration = frame_count / fps
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        duration = frame_count / max(fps, 1e-6)
         cap.release()
-        
+
         if duration > MAX_VIDEO_DURATION_SEC:
             os.remove(filepath)  # Delete the uploaded file
             return jsonify({
@@ -671,8 +686,9 @@ def upload_video():
         'state': 'PENDING_CALIBRATION' if is_trampoline else 'READY',
         'feedback': 'Awaiting bed corner calibration' if is_trampoline else '',
         'engine': None if is_trampoline else ExerciseEngine(),
-        'total_frames': 0,
+        'total_frames': int(frame_count or 0),
         'processed_frames': 0,
+        'video_fps': float(fps or 30.0),
         'current_action': '--',
         'completed_jumps': [],
         'corner_order': TRAMPOLINE_CORNER_ORDER if is_trampoline else None,
@@ -702,6 +718,8 @@ def upload_video():
             'first_frame_image': f"data:image/png;base64,{first_frame_b64}",
             'image_size': image_size,
             'corner_order': TRAMPOLINE_CORNER_ORDER,
+            'video_fps': float(fps or 30.0),
+            'total_frames': int(frame_count or 0),
         })
 
     # Start background processing using subprocess for non-trampoline mode
@@ -718,7 +736,7 @@ def upload_video():
 
 @app.route('/api/video/trampoline/start', methods=['POST'])
 def start_trampoline_analysis():
-    """Start trampoline analysis after pre-analysis bed keyframe calibration."""
+    """Start trampoline analysis after pre-analysis trampoline calibration."""
     cleanup_expired_pending_trampoline_uploads()
     data = request.get_json(silent=True) or {}
     video_id = data.get('video_id')
@@ -731,9 +749,9 @@ def start_trampoline_analysis():
 
     image_size = analysis.get('image_size')
     image_tuple = (int(image_size['width']), int(image_size['height'])) if image_size else None
+
     status = analysis.get('status')
     existing_calibrations = analysis.get('calibrations')
-
     if status == 'completed':
         return jsonify({
             'success': True,
@@ -744,10 +762,10 @@ def start_trampoline_analysis():
         })
     if status == 'processing':
         try:
-            requested = _canonicalize_calibrations_payload(data, image_size=image_tuple)
+            requested = _normalize_trampoline_calibrations(data, image_size=image_tuple)
         except Exception:
             requested = None
-        if requested and _calibrations_equal(existing_calibrations, requested):
+        if requested and existing_calibrations and _calibrations_equal(existing_calibrations, requested):
             return jsonify({
                 'success': True,
                 'video_id': video_id,
@@ -760,7 +778,7 @@ def start_trampoline_analysis():
         return jsonify({'success': False, 'status': status, 'error': 'Video is not ready for calibration start'}), 400
 
     try:
-        calibrations = _canonicalize_calibrations_payload(data, image_size=image_tuple)
+        canonical_calibrations = _normalize_trampoline_calibrations(data, image_size=image_tuple)
     except Exception as e:
         analysis['status'] = 'calibration_rejected'
         analysis['state'] = 'CALIBRATION_REJECTED'
@@ -768,17 +786,16 @@ def start_trampoline_analysis():
         analysis['feedback'] = str(e)
         return jsonify({'success': False, 'status': 'calibration_rejected', 'error': str(e)}), 400
 
-    first = calibrations[0]
+    first_calibration = canonical_calibrations[0]
     sidecar = {
-        'schema_version': 1,
+        'schema_version': 2,
         'video_id': video_id,
         'exercise_type': 'trampoline',
-        'frame_index': int(first['frame_index']),
-        'time_s': first.get('time_s'),
+        'frame_index': int(first_calibration['frame_index']),
         'image_size': analysis.get('image_size'),
         'corner_order': TRAMPOLINE_CORNER_ORDER,
-        'corners_px': first['corners_px'],
-        'calibrations': calibrations,
+        'corners_px': first_calibration['corners_px'],
+        'calibrations': canonical_calibrations,
         'bed_dimensions_m': {'width': 4.28, 'length': 2.14},
         'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     }
@@ -788,11 +805,11 @@ def start_trampoline_analysis():
         json.dump(sidecar, f)
     os.replace(tmp_path, sidecar_path)
 
-    analysis['calibrations'] = calibrations
-    analysis['corners'] = first['corners_px']
+    analysis['corners'] = list(first_calibration['corners_px'])
+    analysis['calibrations'] = canonical_calibrations
     analysis['status'] = 'processing'
     analysis['state'] = 'PROCESSING'
-    analysis['feedback'] = 'Processing trampoline video'
+    analysis['feedback'] = f"Processing trampoline video with {len(canonical_calibrations)} calibration(s)"
     analysis['error'] = None
     analysis['started'] = True
 
@@ -805,6 +822,7 @@ def start_trampoline_analysis():
         'video_id': video_id,
         'status': 'processing',
         'message': 'Trampoline analysis started',
+        'calibration_count': len(canonical_calibrations),
     })
 
 def process_video_subprocess(video_id):

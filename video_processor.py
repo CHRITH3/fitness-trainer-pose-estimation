@@ -355,7 +355,7 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
                     ok_first, first_frame = cap_peek.read()
                     cap_peek.release()
                     if ok_first:
-                        bed_tracker.initialize(first_frame, frame_index=1)
+                        bed_tracker.initialize(first_frame, frame_index=0)
                         print(f"Bed tracker initialized from {corners_json}")
                     else:
                         results['status'] = 'error'
