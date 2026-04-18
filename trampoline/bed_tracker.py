@@ -1041,7 +1041,7 @@ class BedTracker:
         if state == TRACKING_LOST or confidence < 0.2:
             self._marker_lines = []
         else:
-            self._marker_lines = detect_marker_lines(frame_bgr, self.current_corners, max_lines=getattr(self.config, "BED_MARKER_LINE_MAX_LINES", 6))
+            self._marker_lines = detect_marker_lines(frame_bgr, self.current_corners, self.config)
         self.current_info["marker_lines"] = list(self._marker_lines)
         diagnostics = dict(self.current_info.get("diagnostics") or {})
         diagnostics["marker_line_count"] = len(self._marker_lines)
