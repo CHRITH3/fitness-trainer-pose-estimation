@@ -604,7 +604,6 @@ class BedTracker:
         tracking_conf = self._tracking_confidence(1.0, tracked)
         self._tracking_state = self._state_for_confidence(tracking_conf)
         self._refresh_keyframe(gray)
-        marker_lines = self._detect_marker_lines(first_frame_bgr, self.current_corners)
         self.current_info = self._make_info(
             success=True,
             frame_index=frame_index,
@@ -1045,8 +1044,7 @@ class BedTracker:
         self.current_info["marker_lines"] = list(self._marker_lines)
         diagnostics = dict(self.current_info.get("diagnostics") or {})
         diagnostics["marker_line_count"] = len(self._marker_lines)
-        if self._marker_lines:
-            diagnostics["marker_lines"] = list(self._marker_lines)
+        diagnostics["marker_lines"] = list(self._marker_lines)
         self.current_info["diagnostics"] = diagnostics
 
     def update(self, frame_bgr: np.ndarray, frame_index: Optional[int] = None) -> Dict[str, Any]:
@@ -1056,12 +1054,6 @@ class BedTracker:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         frame_index = frame_index if frame_index is not None else ((self._frame_index or -1) + 1)
         self._frame_index = frame_index
-        if manual_info is not None:
-            pts = self._detect_features(gray)
-            if pts is not None:
-                self._prev_pts = pts
-            self._prev_gray = gray
-            return self._attach_marker_lines(frame_bgr, manual_info)
 
         success = False
         relocalization_attempted = False
