@@ -380,6 +380,57 @@ def classify_landing_zone(
     return "edge"
 
 
+def detect_marker_lines(
+    frame_bgr: np.ndarray,
+    bed_corners: Sequence[Sequence[float]],
+    config: Optional[Any] = None,
+) -> List[Dict[str, Any]]:
+    """Best-effort no-dependency marker-line detection inside the trusted bed polygon."""
+    config = config or cfg
+    if not getattr(config, "BED_MARKER_LINES_ENABLED", True):
+        return []
+    if frame_bgr is None or frame_bgr.size == 0:
+        return []
+    corners = np.asarray(bed_corners, dtype=np.float32).reshape(-1, 2)
+    if corners.shape != (4, 2) or not np.all(np.isfinite(corners)):
+        return []
+
+    h, w = frame_bgr.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, np.round(corners).astype(np.int32), 255)
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.bitwise_and(gray, gray, mask=mask)
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+    edges = cv2.bitwise_and(edges, edges, mask=mask)
+
+    bed_diag = max(1.0, float(np.linalg.norm(np.max(corners, axis=0) - np.min(corners, axis=0))))
+    min_len = max(12, int(bed_diag * getattr(config, "BED_MARKER_LINE_MIN_LENGTH_RATIO", 0.12)))
+    raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=24, minLineLength=min_len, maxLineGap=8)
+    if raw is None:
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+    for line in raw.reshape(-1, 4):
+        x1, y1, x2, y2 = [int(v) for v in line]
+        if not (0 <= x1 < w and 0 <= x2 < w and 0 <= y1 < h and 0 <= y2 < h):
+            continue
+        if mask[y1, x1] == 0 or mask[y2, x2] == 0:
+            continue
+        length = float(math.hypot(x2 - x1, y2 - y1))
+        if length < min_len:
+            continue
+        candidates.append({
+            "p1": [float(x1), float(y1)],
+            "p2": [float(x2), float(y2)],
+            "confidence": round(min(1.0, length / bed_diag), 3),
+            "length_px": round(length, 3),
+        })
+
+    candidates.sort(key=lambda item: item["length_px"], reverse=True)
+    return candidates[: int(getattr(config, "BED_MARKER_LINE_MAX_SEGMENTS", 8))]
+
+
 class BedTracker:
     """Track a calibrated trampoline bed plane and map image points to bed coordinates."""
 
@@ -389,14 +440,24 @@ class BedTracker:
         bed_size_m: Tuple[float, float] = None,
         config: Optional[Any] = None,
         image_size: Optional[Tuple[int, int]] = None,
-        calibrations: Optional[Sequence[Dict[str, Any]]] = None,
+        calibrations: Optional[Sequence[Any]] = None,
     ):
         self.config = config or cfg
         self.bed_size_m = bed_size_m or (cfg.BED_WIDTH_M, cfg.BED_LENGTH_M)
         self.image_size = image_size
         normalized = validate_corners(corners_image, image_size=image_size)
-        self.initial_corners = corners_to_array(normalized)
+        self.manual_calibrations = normalize_calibrations(
+            calibrations if calibrations is not None else [{"frame_index": 0, "time_s": 0.0, "corners_px": normalized}],
+            image_size=image_size,
+        )
+        self.initial_corners = _calibration_corners_array(self.manual_calibrations[0])
         self.current_corners = self.initial_corners.copy()
+        self._manual_anchor_by_frame = {
+            self._processing_frame_for_calibration(cal): _calibration_corners_array(cal)
+            for cal in self.manual_calibrations
+        }
+        self._applied_manual_frames = set()
+        self._active_transition: Optional[Dict[str, Any]] = None
         self.H_image_to_bed: Optional[np.ndarray] = None
         self._prev_gray: Optional[np.ndarray] = None
         self._prev_pts: Optional[np.ndarray] = None
@@ -442,13 +503,106 @@ class BedTracker:
         image_size = None
         if image_size_d.get("width") and image_size_d.get("height"):
             image_size = (int(image_size_d["width"]), int(image_size_d["height"]))
-        calibrations = sidecar.get("calibrations") or [{
-            "frame_index": int(sidecar.get("frame_index", 0)),
-            "time_s": sidecar.get("time_s", 0.0),
-            "corners_px": sidecar["corners_px"],
-        }]
-        earliest = min(calibrations, key=lambda item: int(item.get("frame_index", 0)))
-        return cls(earliest["corners_px"], bed_size_m=bed_size, image_size=image_size, calibrations=calibrations)
+        calibrations = sidecar.get("calibrations") or [{"frame_index": sidecar.get("frame_index", 0), "time_s": sidecar.get("time_s"), "corners_px": sidecar["corners_px"]}]
+        return cls(sidecar["corners_px"], bed_size_m=bed_size, image_size=image_size, calibrations=calibrations)
+
+    def _processing_frame_for_calibration(self, calibration: Dict[str, Any]) -> int:
+        # Browser/API frame_index is zero-based; video_processor frame_count is one-based.
+        return int(calibration.get("frame_index", 0)) + 1
+
+    def _is_valid_quad_for_frame(self, corners: np.ndarray) -> bool:
+        try:
+            validate_corners(corners.tolist(), image_size=self.image_size)
+            return True
+        except BedTrackerValidationError:
+            return False
+
+    def _next_transition_anchor(self, frame_index: int) -> Optional[Tuple[int, np.ndarray]]:
+        transition_frames = max(1, int(getattr(self.config, "BED_KEYFRAME_TRANSITION_FRAMES", 20)))
+        for anchor_frame in sorted(self._manual_anchor_by_frame):
+            if anchor_frame in self._applied_manual_frames:
+                continue
+            if anchor_frame <= (self._frame_index or 0):
+                # Initial/previous anchors are already represented by current state.
+                self._applied_manual_frames.add(anchor_frame)
+                continue
+            start_frame = max(1, anchor_frame - transition_frames + 1)
+            if start_frame <= frame_index <= anchor_frame:
+                return anchor_frame, self._manual_anchor_by_frame[anchor_frame]
+        return None
+
+    def _apply_manual_corners(
+        self,
+        corners: np.ndarray,
+        gray: np.ndarray,
+        frame_index: int,
+        diagnostics: Dict[str, Any],
+        tracking_confidence: float = 1.0,
+    ) -> Dict[str, Any]:
+        self.current_corners = corners.astype(np.float32)
+        self._compute_image_to_bed()
+        self._consecutive_failures = 0
+        self._tracking_state = TRACKING_TRUSTED if tracking_confidence >= getattr(self.config, "BED_TRUSTED_CONFIDENCE", 0.6) else TRACKING_LOW_CONFIDENCE
+        self._refresh_keyframe(gray)
+        tracked = 0 if self._prev_pts is None else len(self._prev_pts)
+        self.current_info = self._make_info(
+            success=True,
+            frame_index=frame_index,
+            inlier_ratio=1.0,
+            tracked_points=tracked,
+            tracking_confidence=tracking_confidence,
+            message="manual keyframe correction",
+            diagnostics=diagnostics,
+        )
+        return self.current_info
+
+    def _manual_correction_update(self, gray: np.ndarray, frame_index: int) -> Optional[Dict[str, Any]]:
+        anchor = self._next_transition_anchor(frame_index)
+        if anchor is None:
+            self._active_transition = None
+            return None
+
+        anchor_frame, target = anchor
+        transition_frames = max(1, int(getattr(self.config, "BED_KEYFRAME_TRANSITION_FRAMES", 20)))
+        start_frame = max(1, anchor_frame - transition_frames + 1)
+        if not self._active_transition or self._active_transition.get("anchor_frame") != anchor_frame:
+            self._active_transition = {
+                "anchor_frame": anchor_frame,
+                "start_frame": start_frame,
+                "start_corners": self.current_corners.copy(),
+            }
+        start_corners = self._active_transition["start_corners"]
+        span = max(1, anchor_frame - start_frame + 1)
+        ratio = max(0.0, min(1.0, (frame_index - start_frame + 1) / float(span)))
+        candidate = (start_corners * (1.0 - ratio) + target * ratio).astype(np.float32)
+        diagnostics = {
+            "source": "manual_keyframe",
+            "accepted": True,
+            "anchor_frame": int(anchor_frame),
+            "transition_start_frame": int(start_frame),
+            "transition_ratio": float(ratio),
+            "direct_snap": False,
+        }
+        if not self._is_valid_quad_for_frame(candidate):
+            candidate = target.astype(np.float32)
+            diagnostics.update({"direct_snap": True, "reasons": ["invalid_interpolation"]})
+        info = self._apply_manual_corners(candidate, gray, frame_index, diagnostics, tracking_confidence=1.0 if not diagnostics["direct_snap"] else 0.55)
+        if frame_index >= anchor_frame or diagnostics["direct_snap"]:
+            self._applied_manual_frames.add(anchor_frame)
+            self._active_transition = None
+        return info
+
+    def _attach_marker_lines(self, frame_bgr: np.ndarray, info: Dict[str, Any]) -> Dict[str, Any]:
+        diagnostics = info.setdefault("diagnostics", {})
+        try:
+            lines = detect_marker_lines(frame_bgr, self.current_corners, config=self.config)
+        except Exception as exc:  # best-effort diagnostic only
+            diagnostics["marker_line_error"] = str(exc)
+            lines = []
+        diagnostics["marker_lines"] = lines
+        info["marker_lines"] = lines
+        self.current_info = info
+        return info
 
     def _bed_reference_points(self) -> np.ndarray:
         width, length = self.bed_size_m
@@ -485,7 +639,7 @@ class BedTracker:
             message="initialized",
             diagnostics={"source": "initialization", "marker_lines": marker_lines, "manual_calibration_count": len(self.manual_calibrations)},
         )
-        return self.current_info
+        return self._attach_marker_lines(first_frame_bgr, self.current_info)
 
     def _bed_mask(self, shape: Tuple[int, int], corners: Optional[np.ndarray] = None) -> np.ndarray:
         mask = np.zeros(shape, dtype=np.uint8)
@@ -845,14 +999,16 @@ class BedTracker:
             return self.initialize(frame_bgr, frame_index or 0)
 
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        frame_index = frame_index if frame_index is not None else ((self._frame_index or -1) + 1)
-        self._frame_index = frame_index
+        frame_index = frame_index if frame_index is not None else ((self._frame_index or 0) + 1)
 
-        manual_anchor = self._manual_anchor_due(frame_index)
-        if manual_anchor is not None:
-            info = self._apply_manual_anchor(frame_bgr, gray, frame_index, manual_anchor)
+        manual_info = self._manual_correction_update(gray, frame_index)
+        self._frame_index = frame_index
+        if manual_info is not None:
+            pts = self._detect_features(gray)
+            if pts is not None:
+                self._prev_pts = pts
             self._prev_gray = gray
-            return info
+            return self._attach_marker_lines(frame_bgr, manual_info)
 
         success = False
         relocalization_attempted = False
@@ -938,7 +1094,7 @@ class BedTracker:
             if pts is not None:
                 self._prev_pts = pts
         self._prev_gray = gray
-        return info
+        return self._attach_marker_lines(frame_bgr, info)
 
     def image_to_bed(self, pt_xy: Sequence[float]) -> Tuple[float, float]:
         if self.H_image_to_bed is None:
