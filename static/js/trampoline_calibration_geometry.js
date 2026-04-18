@@ -73,26 +73,17 @@
         };
     }
 
-    function frameIndexFromTime(timeS, fps) {
-        const t = Number(timeS);
-        const f = Number(fps);
-        if (!Number.isFinite(t) || t < 0 || !Number.isFinite(f) || f <= 0) {
-            return 0;
-        }
-        return Math.max(0, Math.round(t * f));
-    }
-
     function buildCalibrationPayload(keyframes) {
         if (!Array.isArray(keyframes)) return [];
         return keyframes
-            .filter(kf => kf && Array.isArray(kf.corners_px) && kf.corners_px.length === 4)
-            .map(kf => ({
-                frame_index: Math.max(0, Math.round(Number(kf.frame_index) || 0)),
-                time_s: Math.max(0, Number(kf.time_s) || 0),
-                corners_px: kf.corners_px.map((pt, idx) => ({
-                    name: pt.name || ['front_left', 'front_right', 'back_right', 'back_left'][idx],
-                    x: Number(pt.x),
-                    y: Number(pt.y),
+            .filter(frame => frame && Array.isArray(frame.corners) && frame.corners.length === 4)
+            .map(frame => ({
+                frame_index: Math.max(0, Math.round(Number(frame.frameIndex) || 0)),
+                time_s: Math.max(0, Number(frame.timeS) || 0),
+                corners_px: frame.corners.map((corner, idx) => ({
+                    name: corner.name || ['front_left', 'front_right', 'back_right', 'back_left'][idx],
+                    x: Number(corner.x),
+                    y: Number(corner.y),
                 })),
             }))
             .sort((a, b) => a.frame_index - b.frame_index);
@@ -102,7 +93,6 @@
         computeContainRect,
         displayToImagePoint,
         imageToDisplayPoint,
-        frameIndexFromTime,
         buildCalibrationPayload,
     };
 });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import geometry from '../static/js/trampoline_calibration_geometry.js';
 
-const { computeContainRect, displayToImagePoint, imageToDisplayPoint } = geometry;
+const { computeContainRect, displayToImagePoint, imageToDisplayPoint, buildCalibrationPayload } = geometry;
 
 function approx(actual, expected, tolerance = 1) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} not within ${tolerance} of ${expected}`);
@@ -41,6 +41,24 @@ function approx(actual, expected, tolerance = 1) {
     const roundTrip = displayToImagePoint(displayed, rect, imageSize);
     approx(roundTrip.x, original.x);
     approx(roundTrip.y, original.y);
+}
+
+// Keyframe payload builder sorts and serializes original-pixel corners.
+{
+    const corners = [
+        { name: 'front_left', x: 10, y: 90 },
+        { name: 'front_right', x: 90, y: 90 },
+        { name: 'back_right', x: 90, y: 10 },
+        { name: 'back_left', x: 10, y: 10 },
+    ];
+    const payload = buildCalibrationPayload([
+        { frameIndex: 45, timeS: 1.5, corners },
+        { frameIndex: 0, timeS: 0, corners },
+    ]);
+    assert.equal(payload.length, 2);
+    assert.equal(payload[0].frame_index, 0);
+    assert.equal(payload[1].frame_index, 45);
+    assert.deepEqual(payload[1].corners_px.map(p => p.name), ['front_left', 'front_right', 'back_right', 'back_left']);
 }
 
 console.log('trampoline calibration geometry tests passed');
