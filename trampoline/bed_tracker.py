@@ -373,58 +373,6 @@ def load_corners_sidecar(path: str, expected_video_id: Optional[str] = None) -> 
     return parsed
 
 
-def detect_marker_lines(
-    frame_bgr: np.ndarray,
-    corners: Sequence[Sequence[float]],
-    max_lines: int = 6,
-) -> List[Dict[str, Any]]:
-    if frame_bgr is None or frame_bgr.size == 0:
-        return []
-    quad = np.asarray(corners, dtype=np.float32).reshape(-1, 2)
-    if quad.shape != (4, 2) or not np.all(np.isfinite(quad)):
-        return []
-
-    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-    mask = np.zeros(gray.shape, dtype=np.uint8)
-    quad_i = np.round(quad).astype(np.int32)
-    cv2.fillConvexPoly(mask, quad_i, 255)
-
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 60, 180)
-    edges = cv2.bitwise_and(edges, mask)
-
-    h, w = gray.shape[:2]
-    min_line_length = max(18, int(min(h, w) * 0.08))
-    lines = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180.0,
-        threshold=max(20, int(min(h, w) * 0.04)),
-        minLineLength=min_line_length,
-        maxLineGap=max(10, int(min(h, w) * 0.02)),
-    )
-    if lines is None:
-        return []
-
-    kept: List[Dict[str, Any]] = []
-    for raw in lines[:64]:
-        x1, y1, x2, y2 = [int(v) for v in raw[0]]
-        midpoint = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-        if cv2.pointPolygonTest(quad.astype(np.float32), midpoint, False) < 0:
-            continue
-        length = float(math.hypot(x2 - x1, y2 - y1))
-        if length < min_line_length:
-            continue
-        kept.append({
-            "p1": [x1, y1],
-            "p2": [x2, y2],
-            "length": round(length, 3),
-            "score": round(length / max(1.0, float(min(h, w))), 4),
-        })
-
-    kept.sort(key=lambda item: (item["score"], item["length"]), reverse=True)
-    return kept[:max_lines]
-
 def classify_landing_zone(
     bed_xy_m: Sequence[float],
     bed_size_m: Tuple[float, float] = None,
@@ -959,14 +907,15 @@ class BedTracker:
                 gray,
                 frame_index,
                 target_corners,
-                source="manual_anchor",
+                source="manual_keyframe",
                 message="manual keyframe anchor applied",
                 confidence=1.0,
                 diagnostics={
-                    "source": "manual_anchor",
+                    "source": "manual_keyframe",
                     "accepted": True,
                     "target_frame_index": target_frame,
                     "time_s": anchor.get("time_s"),
+                    "transition_progress": 1.0,
                 },
                 refresh_keyframe=True,
             )
@@ -994,17 +943,17 @@ class BedTracker:
             source="manual_transition",
         )
         diagnostics.update({
-            "source": "manual_transition",
+            "source": "manual_keyframe",
             "target_frame_index": target_frame,
             "time_s": anchor.get("time_s"),
-            "progress": round(progress, 4),
+            "transition_progress": round(progress, 4),
         })
         if diagnostics["accepted"]:
             return self._apply_manual_corners(
                 gray,
                 frame_index,
                 interpolated,
-                source="manual_transition",
+                source="manual_keyframe",
                 message="manual keyframe transition",
                 confidence=0.92,
                 diagnostics=diagnostics,
@@ -1015,14 +964,15 @@ class BedTracker:
             gray,
             frame_index,
             target_corners,
-            source="manual_anchor_fallback",
+            source="manual_keyframe",
             message="manual keyframe fallback applied",
             confidence=0.45,
             diagnostics={
-                "source": "manual_anchor_fallback",
+                "source": "manual_keyframe",
                 "accepted": True,
                 "target_frame_index": target_frame,
                 "time_s": anchor.get("time_s"),
+                "transition_progress": 1.0,
                 "fallback_reasons": diagnostics.get("reasons", []),
             },
             refresh_keyframe=True,
