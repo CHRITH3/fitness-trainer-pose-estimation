@@ -48,6 +48,78 @@ class BedTrackerInfo:
         }
 
 
+@dataclass(frozen=True)
+class BedCalibration:
+    frame_index: int
+    time_s: Optional[float]
+    corners_px: List[Dict[str, float]]
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = {
+            "frame_index": int(self.frame_index),
+            "corners_px": [
+                {"name": p["name"], "x": float(p["x"]), "y": float(p["y"])}
+                for p in self.corners_px
+            ],
+        }
+        if self.time_s is not None:
+            data["time_s"] = float(self.time_s)
+        return data
+
+
+def _coerce_frame_index(value: Any) -> int:
+    if isinstance(value, bool):
+        raise BedTrackerValidationError("Calibration frame_index must be an integer")
+    try:
+        frame_index = int(value)
+    except (TypeError, ValueError) as exc:
+        raise BedTrackerValidationError("Calibration frame_index must be an integer") from exc
+    if frame_index < 0 or float(frame_index) != float(value):
+        raise BedTrackerValidationError("Calibration frame_index must be a non-negative integer")
+    return frame_index
+
+
+def normalize_calibrations(
+    calibrations: Sequence[Any],
+    image_size: Optional[Tuple[int, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Validate and canonicalize manual bed calibration keyframes."""
+    if not isinstance(calibrations, Sequence) or isinstance(calibrations, (str, bytes)):
+        raise BedTrackerValidationError("calibrations must be a list")
+    if not calibrations:
+        raise BedTrackerValidationError("At least one calibration is required")
+
+    seen_frames = set()
+    normalized: List[BedCalibration] = []
+    for item in calibrations:
+        if not isinstance(item, dict):
+            raise BedTrackerValidationError("Each calibration must be an object")
+        frame_index = _coerce_frame_index(item.get("frame_index", 0))
+        if frame_index in seen_frames:
+            raise BedTrackerValidationError("Duplicate calibration frame_index values are not allowed")
+        seen_frames.add(frame_index)
+
+        time_s = item.get("time_s")
+        if time_s is not None:
+            try:
+                time_s = float(time_s)
+            except (TypeError, ValueError) as exc:
+                raise BedTrackerValidationError("Calibration time_s must be numeric") from exc
+            if not math.isfinite(time_s) or time_s < 0:
+                raise BedTrackerValidationError("Calibration time_s must be a finite non-negative number")
+
+        corners = item.get("corners_px", item.get("corners"))
+        canonical_corners = validate_corners(corners or [], image_size=image_size)
+        normalized.append(BedCalibration(frame_index, time_s, canonical_corners))
+
+    normalized.sort(key=lambda cal: cal.frame_index)
+    return [cal.to_dict() for cal in normalized]
+
+
+def _calibration_corners_array(calibration: Dict[str, Any]) -> np.ndarray:
+    return corners_to_array(calibration["corners_px"])
+
+
 def _coerce_point(point: Any, default_name: Optional[str] = None) -> Dict[str, float]:
     if isinstance(point, dict):
         if "x" not in point or "y" not in point:
