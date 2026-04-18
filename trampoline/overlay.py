@@ -96,7 +96,13 @@ def draw_trampoline_overlay(frame, stats, bed_info=None):
 
     # --- Optional bed tracking overlay ---
     if bed_info:
-        draw_bed_quad(frame, bed_info.get("corners"), bed_info.get("tracking_confidence"))
+        draw_bed_quad(
+            frame,
+            bed_info.get("corners"),
+            bed_info.get("tracking_confidence"),
+            bed_info.get("tracking_state"),
+            bed_info.get("message"),
+        )
     latest_landing = stats.get("latest_landing")
     if latest_landing:
         draw_landing_marker(frame, latest_landing.get("ankle_px"), latest_landing, latest_landing.get("zone"))
@@ -107,22 +113,39 @@ def draw_trampoline_overlay(frame, stats, bed_info=None):
     return frame
 
 
-def draw_bed_quad(frame, corners, confidence=None):
-    """Draw the tracked trampoline bed quadrilateral."""
+def bed_quad_style(confidence=None, tracking_state=None):
+    """Return BGR color and label prefix for bed-tracking trust state."""
+    state = tracking_state or "trusted"
+    conf = 1.0 if confidence is None else float(confidence)
+    if state == "tracking_lost":
+        return (0, 0, 255), "Bed lost"
+    if state == "frozen":
+        return (160, 160, 160), "Bed frozen"
+    if state == "low_confidence" or conf < 0.6:
+        return (0, 190, 255), "Bed low"
+    return (0, 230, 118), "Bed"
+
+
+def draw_bed_quad(frame, corners, confidence=None, tracking_state=None, message=None):
+    """Draw the tracked trampoline bed quadrilateral with trust-state styling."""
     if not corners or len(corners) != 4:
         return frame
     quad = np.array(corners, dtype=np.float32).reshape(-1, 2)
     if not np.all(np.isfinite(quad)):
         return frame
     quad_i = np.round(quad).astype(np.int32)
+    color, label_prefix = bed_quad_style(confidence, tracking_state)
     overlay = frame.copy()
-    cv2.fillConvexPoly(overlay, quad_i, (0, 180, 80))
-    cv2.addWeighted(overlay, 0.16, frame, 0.84, 0, frame)
-    cv2.polylines(frame, [quad_i], isClosed=True, color=(0, 230, 118), thickness=2, lineType=cv2.LINE_AA)
+    cv2.fillConvexPoly(overlay, quad_i, color)
+    cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
+    cv2.polylines(frame, [quad_i], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+    label = label_prefix
     if confidence is not None:
-        label = f"Bed {float(confidence):.2f}"
-        x, y = int(quad_i[0][0]), int(quad_i[0][1])
-        cv2.putText(frame, label, (x, max(15, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 230, 118), 1, cv2.LINE_AA)
+        label = f"{label} {float(confidence):.2f}"
+    if message and tracking_state in {"frozen", "tracking_lost"}:
+        label = f"{label} ({tracking_state})"
+    x, y = int(quad_i[0][0]), int(quad_i[0][1])
+    cv2.putText(frame, label, (x, max(15, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
     return frame
 
 

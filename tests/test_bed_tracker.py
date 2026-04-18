@@ -81,7 +81,6 @@ def test_sidecar_parsing_tolerates_unknown_fields(tmp_path):
     assert parsed["unknown"] == "ok"
 
 
-
 def test_sidecar_missing_required_fields_rejected(tmp_path):
     path = tmp_path / "vid_corners.json"
     data = {
@@ -123,3 +122,125 @@ def test_known_warp_recovery():
     expected = cv2.perspectiveTransform(expected_corners, H).reshape(-1, 2)
     assert info["success"]
     assert np.max(np.linalg.norm(np.array(info["corners"]) - expected, axis=1)) < 4.0
+
+
+def noisy_textured_frame(width=640, height=480):
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    rng = np.random.default_rng(42)
+    cv2.rectangle(frame, (100, 100), (500, 300), (25, 25, 25), -1)
+    for idx in range(120):
+        x = int(rng.integers(115, 485))
+        y = int(rng.integers(115, 285))
+        color = int(rng.integers(90, 255))
+        cv2.circle(frame, (x, y), int(rng.integers(2, 5)), (color, color, color), -1)
+        if idx % 10 == 0:
+            cv2.rectangle(frame, (x - 4, y - 3), (x + 5, y + 4), (255 - color, color, 180), 1)
+    cv2.putText(frame, "TRAMP", (170, 205), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (220, 220, 220), 3)
+    return frame
+
+
+def test_candidate_sanity_rejects_self_intersection_and_preserves_trusted_corners():
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    frame = textured_frame()
+    tracker.initialize(frame, frame_index=1)
+    trusted = tracker.current_corners.copy()
+    bad = np.array([[100, 300], [500, 100], [500, 300], [100, 100]], dtype=np.float32)
+
+    diagnostics = tracker.validate_candidate_corners(bad, inlier_ratio=1.0, tracked_points=50)
+    info = tracker._reject_candidate(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 2, 1.0, 50, diagnostics)
+
+    assert not diagnostics["accepted"]
+    assert "self_intersection" in diagnostics["reasons"]
+    assert np.allclose(tracker.current_corners, trusted)
+    assert info["tracking_state"] in {"frozen", "tracking_lost"}
+    assert info["tracking_confidence"] < 0.6
+
+
+def test_candidate_sanity_rejects_area_and_center_jumps():
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    tracker.initialize(textured_frame(), frame_index=1)
+
+    huge = np.array([[0, 470], [639, 470], [639, 0], [0, 0]], dtype=np.float32)
+    huge_diag = tracker.validate_candidate_corners(huge, inlier_ratio=1.0, tracked_points=50)
+    assert not huge_diag["accepted"]
+    assert "area_jump" in huge_diag["reasons"] or "center_shift" in huge_diag["reasons"]
+
+    shifted = tracker.current_corners + np.array([400, 0], dtype=np.float32)
+    shifted_diag = tracker.validate_candidate_corners(shifted, inlier_ratio=1.0, tracked_points=50)
+    assert not shifted_diag["accepted"]
+    assert "center_shift" in shifted_diag["reasons"] or "out_of_bounds" in shifted_diag["reasons"]
+
+
+def test_candidate_sanity_rejects_low_inlier_support():
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    tracker.initialize(textured_frame(), frame_index=1)
+
+    diagnostics = tracker.validate_candidate_corners(tracker.current_corners + 1, inlier_ratio=0.1, tracked_points=3)
+
+    assert not diagnostics["accepted"]
+    assert "too_few_points" in diagnostics["reasons"]
+    assert "low_inlier_ratio" in diagnostics["reasons"]
+
+
+def test_rejected_update_preserves_low_confidence_landing_output():
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    frame = textured_frame()
+    tracker.initialize(frame, frame_index=1)
+    diagnostics = tracker.validate_candidate_corners(tracker.current_corners + np.array([400, 0], dtype=np.float32), 0.1, 3)
+    tracker._reject_candidate(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 2, 0.1, 3, diagnostics)
+
+    payload = tracker.landing_payload((300, 200), ankle_visibility=0.5)
+
+    assert payload["bed_xy_m"] == pytest.approx([2.0, 1.0], abs=1e-3)
+    assert payload["confidence"] < 0.6
+
+
+def test_orb_relocalization_recovers_controlled_warp():
+    first = noisy_textured_frame()
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    tracker.initialize(first, frame_index=1)
+
+    src = np.array([[0, 0], [639, 0], [639, 479], [0, 479]], dtype=np.float32)
+    dst = np.array([[16, 10], [620, 18], [612, 460], [24, 452]], dtype=np.float32)
+    H = cv2.getPerspectiveTransform(src, dst)
+    warped = cv2.warpPerspective(first, H, (640, 480))
+    info = tracker._try_relocalize(cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY), frame_index=2)
+    expected = cv2.perspectiveTransform(
+        np.array([[[p["x"], p["y"]] for p in RECT_CORNERS]], dtype=np.float32), H
+    ).reshape(-1, 2)
+
+    assert info["success"], info
+    assert info["diagnostics"]["source"] == "orb"
+    assert np.max(np.linalg.norm(np.array(info["corners"]) - expected, axis=1)) < 20.0
+
+
+def test_failed_orb_relocalization_freezes_without_moving_corners():
+    first = noisy_textured_frame()
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    tracker.initialize(first, frame_index=1)
+    trusted = tracker.current_corners.copy()
+    blank = np.zeros((480, 640), dtype=np.uint8)
+
+    info = tracker._try_relocalize(blank, frame_index=2)
+
+    assert not info["success"]
+    assert np.allclose(tracker.current_corners, trusted)
+    assert info["tracking_state"] in {"frozen", "tracking_lost"}
+
+
+def test_update_without_orb_keyframe_degrades_instead_of_returning_none():
+    first = textured_frame()
+    tracker = BedTracker(RECT_CORNERS, bed_size_m=(4.0, 2.0), image_size=(640, 480))
+    tracker.initialize(first, frame_index=1)
+    tracker._keyframe_descriptors = None
+    tracker._keyframe_keypoints = None
+    tracker._keyframe_corners = None
+    tracker._prev_pts = None
+
+    info = tracker.update(np.zeros_like(first), frame_index=2)
+
+    assert info is not None
+    assert not info["success"]
+    assert info["tracking_state"] in {"frozen", "tracking_lost"}
+    assert info["tracking_confidence"] < 0.6
+    assert "no_keyframe" in info["diagnostics"]["reasons"]

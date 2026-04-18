@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import cv2
@@ -12,6 +12,10 @@ import numpy as np
 import trampoline.config as cfg
 
 CORNER_ORDER = ["front_left", "front_right", "back_right", "back_left"]
+TRACKING_TRUSTED = "trusted"
+TRACKING_LOW_CONFIDENCE = "low_confidence"
+TRACKING_FROZEN = "frozen"
+TRACKING_LOST = "tracking_lost"
 
 
 class BedTrackerValidationError(ValueError):
@@ -27,6 +31,8 @@ class BedTrackerInfo:
     tracked_points: int
     tracking_confidence: float
     message: str = ""
+    tracking_state: str = TRACKING_LOW_CONFIDENCE
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -37,6 +43,8 @@ class BedTrackerInfo:
             "tracked_points": self.tracked_points,
             "tracking_confidence": self.tracking_confidence,
             "message": self.message,
+            "tracking_state": self.tracking_state,
+            "diagnostics": self.diagnostics,
         }
 
 
@@ -63,12 +71,7 @@ def _coerce_point(point: Any, default_name: Optional[str] = None) -> Dict[str, f
 
 
 def normalize_corners(corners: Sequence[Any]) -> List[Dict[str, float]]:
-    """Normalize corner input to named `{name, x, y}` dictionaries.
-
-    Accepted input shapes:
-    - `[[x, y], ...]` in canonical corner order.
-    - `[{"name": ..., "x": ..., "y": ...}, ...]`.
-    """
+    """Normalize corner input to named `{name, x, y}` dictionaries."""
     if len(corners) != 4:
         raise BedTrackerValidationError("Exactly 4 bed corners are required")
     normalized = [_coerce_point(p, CORNER_ORDER[i]) for i, p in enumerate(corners)]
@@ -98,6 +101,35 @@ def _segment_intersection(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.nda
     return (o1 * o2 < 0) and (o3 * o4 < 0)
 
 
+def _quad_area(corners: np.ndarray) -> float:
+    return abs(float(cv2.contourArea(corners.astype(np.float32).reshape(-1, 1, 2))))
+
+
+def _quad_center(corners: np.ndarray) -> np.ndarray:
+    return np.mean(corners.astype(np.float32).reshape(-1, 2), axis=0)
+
+
+def _edge_lengths(corners: np.ndarray) -> np.ndarray:
+    pts = corners.astype(np.float32).reshape(-1, 2)
+    return np.array([float(np.linalg.norm(pts[(i + 1) % 4] - pts[i])) for i in range(4)], dtype=np.float32)
+
+
+def _is_convex_quad(corners: np.ndarray) -> bool:
+    pts = corners.astype(np.float32).reshape(-1, 2)
+    signs = []
+    for i in range(4):
+        a = pts[i]
+        b = pts[(i + 1) % 4]
+        c = pts[(i + 2) % 4]
+        v1 = b - a
+        v2 = c - b
+        cross = float(v1[0] * v2[1] - v1[1] * v2[0])
+        if abs(cross) < 1e-6:
+            return False
+        signs.append(cross > 0)
+    return all(signs) or not any(signs)
+
+
 def validate_corners(
     corners: Sequence[Any],
     image_size: Optional[Tuple[int, int]] = None,
@@ -123,7 +155,7 @@ def validate_corners(
             if float(np.linalg.norm(pts[i] - pts[j])) < min_dist:
                 raise BedTrackerValidationError("Corner points are duplicated or too close together")
 
-    area = abs(float(cv2.contourArea(pts.reshape(-1, 1, 2))))
+    area = _quad_area(pts)
     min_area_px = min_area_px if min_area_px is not None else getattr(cfg, "BED_MIN_QUAD_AREA_PX", 100.0)
     if area < min_area_px:
         raise BedTrackerValidationError("Bed quadrilateral area is too small")
@@ -136,11 +168,9 @@ def validate_corners(
 
     if _segment_intersection(pts[0], pts[1], pts[2], pts[3]) or _segment_intersection(pts[1], pts[2], pts[3], pts[0]):
         raise BedTrackerValidationError("Bed corners form a self-intersecting quadrilateral")
+    if not _is_convex_quad(pts):
+        raise BedTrackerValidationError("Bed corners must form a convex quadrilateral")
 
-    # The required visual order front-left -> front-right -> back-right -> back-left
-    # should form a simple clockwise/counter-clockwise polygon. The signed area may
-    # differ by camera/view convention, so self-intersection + homography degeneracy
-    # are the hard order checks for MVP.
     bed_ref = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32)
     H, _ = cv2.findHomography(pts, bed_ref, 0)
     if H is None or not np.all(np.isfinite(H)):
@@ -244,6 +274,14 @@ class BedTracker:
         self._prev_pts: Optional[np.ndarray] = None
         self._frame_index: Optional[int] = None
         self._initialized = False
+        self._consecutive_failures = 0
+        self._tracking_state = TRACKING_LOW_CONFIDENCE
+        self._orb = cv2.ORB_create(nfeatures=getattr(cfg, "BED_ORB_MAX_FEATURES", 500))
+        self._keyframe_gray: Optional[np.ndarray] = None
+        self._keyframe_corners: Optional[np.ndarray] = None
+        self._keyframe_keypoints = None
+        self._keyframe_descriptors = None
+        self._last_relocalize_frame = 0
         self.current_info = BedTrackerInfo(
             success=False,
             frame_index=None,
@@ -252,6 +290,7 @@ class BedTracker:
             tracked_points=0,
             tracking_confidence=0.0,
             message="not initialized",
+            tracking_state=self._tracking_state,
         ).to_dict()
         self._compute_image_to_bed()
 
@@ -279,28 +318,31 @@ class BedTracker:
         if first_frame_bgr is None or first_frame_bgr.size == 0:
             raise BedTrackerValidationError("Cannot initialize tracker from an empty frame")
         self.image_size = (first_frame_bgr.shape[1], first_frame_bgr.shape[0])
-        # Revalidate now that image bounds are known.
         validate_corners(self.current_corners.tolist(), image_size=self.image_size)
         gray = cv2.cvtColor(first_frame_bgr, cv2.COLOR_BGR2GRAY)
         self._prev_gray = gray
         self._prev_pts = self._detect_features(gray)
         self._frame_index = frame_index
         self._initialized = True
+        self._consecutive_failures = 0
         tracked = 0 if self._prev_pts is None else len(self._prev_pts)
-        self.current_info = BedTrackerInfo(
+        tracking_conf = self._tracking_confidence(1.0, tracked)
+        self._tracking_state = self._state_for_confidence(tracking_conf)
+        self._refresh_keyframe(gray)
+        self.current_info = self._make_info(
             success=True,
             frame_index=frame_index,
-            corners=self.current_corners.tolist(),
             inlier_ratio=1.0 if tracked else 0.0,
             tracked_points=tracked,
-            tracking_confidence=self._tracking_confidence(1.0, tracked),
+            tracking_confidence=tracking_conf,
             message="initialized",
-        ).to_dict()
+            diagnostics={"source": "initialization"},
+        )
         return self.current_info
 
-    def _bed_mask(self, shape: Tuple[int, int]) -> np.ndarray:
+    def _bed_mask(self, shape: Tuple[int, int], corners: Optional[np.ndarray] = None) -> np.ndarray:
         mask = np.zeros(shape, dtype=np.uint8)
-        cv2.fillConvexPoly(mask, np.round(self.current_corners).astype(np.int32), 255)
+        cv2.fillConvexPoly(mask, np.round(corners if corners is not None else self.current_corners).astype(np.int32), 255)
         return mask
 
     def _detect_features(self, gray: np.ndarray) -> Optional[np.ndarray]:
@@ -321,16 +363,241 @@ class BedTracker:
         point_score = min(1.0, tracked_points / float(min_points))
         return float(max(0.0, min(1.0, 0.65 * inlier_ratio + 0.35 * point_score)))
 
+    def _state_for_confidence(self, confidence: float) -> str:
+        if self._consecutive_failures >= getattr(cfg, "BED_TRACKING_LOST_AFTER_FAILURES", 3):
+            return TRACKING_LOST
+        if self._consecutive_failures > 0:
+            return TRACKING_FROZEN
+        if confidence >= getattr(cfg, "BED_TRUSTED_CONFIDENCE", 0.6):
+            return TRACKING_TRUSTED
+        if confidence >= getattr(cfg, "BED_LOW_CONFIDENCE", 0.3):
+            return TRACKING_LOW_CONFIDENCE
+        return TRACKING_FROZEN
+
+    def _make_info(
+        self,
+        success: bool,
+        frame_index: Optional[int],
+        inlier_ratio: float,
+        tracked_points: int,
+        tracking_confidence: float,
+        message: str,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return BedTrackerInfo(
+            success=success,
+            frame_index=frame_index,
+            corners=self.current_corners.tolist(),
+            inlier_ratio=float(inlier_ratio),
+            tracked_points=int(tracked_points),
+            tracking_confidence=float(max(0.0, min(1.0, tracking_confidence))),
+            message=message,
+            tracking_state=self._tracking_state,
+            diagnostics=diagnostics or {},
+        ).to_dict()
+
+    def validate_candidate_corners(
+        self,
+        candidate_corners: Sequence[Sequence[float]],
+        inlier_ratio: float = 1.0,
+        tracked_points: Optional[int] = None,
+        source: str = "lk",
+    ) -> Dict[str, Any]:
+        candidate = np.asarray(candidate_corners, dtype=np.float32).reshape(-1, 2)
+        diagnostics: Dict[str, Any] = {"source": source, "accepted": False, "reasons": []}
+        tracked_points = tracked_points if tracked_points is not None else getattr(self.config, "BED_MIN_TRACK_POINTS", 20)
+
+        if candidate.shape != (4, 2) or not np.all(np.isfinite(candidate)):
+            diagnostics["reasons"].append("non_finite_or_wrong_shape")
+            return diagnostics
+
+        min_points = getattr(self.config, "BED_MIN_TRACK_POINTS", 20)
+        if tracked_points < min_points:
+            diagnostics["reasons"].append("too_few_points")
+        if inlier_ratio < getattr(self.config, "BED_ACCEPT_INLIER_RATIO", 0.35):
+            diagnostics["reasons"].append("low_inlier_ratio")
+        if _segment_intersection(candidate[0], candidate[1], candidate[2], candidate[3]) or _segment_intersection(candidate[1], candidate[2], candidate[3], candidate[0]):
+            diagnostics["reasons"].append("self_intersection")
+        if not _is_convex_quad(candidate):
+            diagnostics["reasons"].append("not_convex")
+
+        current_area = max(1.0, _quad_area(self.current_corners))
+        candidate_area = _quad_area(candidate)
+        area_ratio = candidate_area / current_area
+        diagnostics["area_ratio"] = area_ratio
+        if area_ratio > getattr(self.config, "BED_MAX_AREA_RATIO_CHANGE", 1.75) or area_ratio < getattr(self.config, "BED_MIN_AREA_RATIO_CHANGE", 0.45):
+            diagnostics["reasons"].append("area_jump")
+
+        if self.image_size:
+            width, height = self.image_size
+            diag = math.hypot(width, height)
+            center_shift = float(np.linalg.norm(_quad_center(candidate) - _quad_center(self.current_corners)))
+            max_shift_ratio = getattr(self.config, "BED_ORB_MAX_CENTER_SHIFT_RATIO", 0.65) if source == "orb" else getattr(self.config, "BED_MAX_CENTER_SHIFT_RATIO", 0.25)
+            diagnostics["center_shift_ratio"] = center_shift / max(1.0, diag)
+            if center_shift > diag * max_shift_ratio:
+                diagnostics["reasons"].append("center_shift")
+
+            margin = getattr(self.config, "BED_BOUNDS_MARGIN_RATIO", 0.2)
+            min_x, min_y = -width * margin, -height * margin
+            max_x, max_y = width * (1.0 + margin), height * (1.0 + margin)
+            if np.any(candidate[:, 0] < min_x) or np.any(candidate[:, 0] > max_x) or np.any(candidate[:, 1] < min_y) or np.any(candidate[:, 1] > max_y):
+                diagnostics["reasons"].append("out_of_bounds")
+
+        current_edges = np.maximum(_edge_lengths(self.current_corners), 1.0)
+        candidate_edges = _edge_lengths(candidate)
+        edge_ratios = candidate_edges / current_edges
+        diagnostics["edge_scale_min"] = float(np.min(edge_ratios))
+        diagnostics["edge_scale_max"] = float(np.max(edge_ratios))
+        if np.any(edge_ratios > getattr(self.config, "BED_MAX_EDGE_SCALE_CHANGE", 2.5)) or np.any(edge_ratios < getattr(self.config, "BED_MIN_EDGE_SCALE_CHANGE", 0.35)):
+            diagnostics["reasons"].append("edge_scale_jump")
+
+        H, _ = cv2.findHomography(candidate.astype(np.float32), self._bed_reference_points(), 0)
+        if H is None or not np.all(np.isfinite(H)):
+            diagnostics["reasons"].append("bad_homography")
+
+        diagnostics["accepted"] = not diagnostics["reasons"]
+        return diagnostics
+
+    def _accept_candidate(
+        self,
+        candidate_corners: np.ndarray,
+        gray: np.ndarray,
+        frame_index: int,
+        inlier_ratio: float,
+        tracked_points: int,
+        source: str,
+    ) -> Dict[str, Any]:
+        self.current_corners = candidate_corners.astype(np.float32)
+        self._compute_image_to_bed()
+        self._consecutive_failures = 0
+        tracking_conf = self._tracking_confidence(inlier_ratio, tracked_points)
+        self._tracking_state = self._state_for_confidence(tracking_conf)
+        if self._tracking_state == TRACKING_TRUSTED or source == "orb":
+            self._refresh_keyframe(gray)
+        self.current_info = self._make_info(
+            success=True,
+            frame_index=frame_index,
+            inlier_ratio=inlier_ratio,
+            tracked_points=tracked_points,
+            tracking_confidence=tracking_conf,
+            message="tracked" if source == "lk" else "relocalized",
+            diagnostics={"source": source, "accepted": True},
+        )
+        return self.current_info
+
+    def _reject_candidate(
+        self,
+        gray: np.ndarray,
+        frame_index: int,
+        inlier_ratio: float,
+        tracked_points: int,
+        diagnostics: Optional[Dict[str, Any]],
+        message: str = "tracking degraded; frozen on last trusted homography",
+    ) -> Dict[str, Any]:
+        self._consecutive_failures += 1
+        tracking_conf = self._tracking_confidence(max(0.0, inlier_ratio * 0.35), tracked_points)
+        tracking_conf *= 0.5
+        self._tracking_state = self._state_for_confidence(tracking_conf)
+        self.current_info = self._make_info(
+            success=False,
+            frame_index=frame_index,
+            inlier_ratio=inlier_ratio,
+            tracked_points=tracked_points,
+            tracking_confidence=tracking_conf,
+            message=message,
+            diagnostics=diagnostics or {"accepted": False},
+        )
+        return self.current_info
+
+    def _refresh_keyframe(self, gray: np.ndarray) -> None:
+        mask = self._bed_mask(gray.shape)
+        keypoints, descriptors = self._orb.detectAndCompute(gray, mask)
+        if descriptors is None or not keypoints:
+            return
+        self._keyframe_gray = gray.copy()
+        self._keyframe_corners = self.current_corners.copy()
+        self._keyframe_keypoints = keypoints
+        self._keyframe_descriptors = descriptors
+
+    def _try_relocalize(self, gray: np.ndarray, frame_index: int) -> Optional[Dict[str, Any]]:
+        if self._keyframe_descriptors is None or self._keyframe_keypoints is None or self._keyframe_corners is None:
+            return self._reject_candidate(
+                gray,
+                frame_index,
+                0.0,
+                0,
+                {"source": "orb", "accepted": False, "reasons": ["no_keyframe"]},
+                message="tracking lost; no ORB keyframe available",
+            )
+        keypoints, descriptors = self._orb.detectAndCompute(gray, None)
+        if descriptors is None or not keypoints:
+            return self._reject_candidate(
+                gray,
+                frame_index,
+                0.0,
+                0,
+                {"source": "orb", "accepted": False, "reasons": ["no_descriptors"]},
+                message="tracking lost; ORB relocalization found no descriptors",
+            )
+        matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = sorted(matcher.match(self._keyframe_descriptors, descriptors), key=lambda m: m.distance)
+        min_matches = getattr(self.config, "BED_ORB_MIN_MATCHES", 8)
+        if len(matches) < min_matches:
+            return self._reject_candidate(
+                gray,
+                frame_index,
+                0.0,
+                len(matches),
+                {"source": "orb", "accepted": False, "reasons": ["too_few_orb_matches"], "matches": len(matches)},
+                message="tracking lost; ORB relocalization had too few matches",
+            )
+        good = matches[: min(len(matches), max(min_matches, 60))]
+        src = np.float32([self._keyframe_keypoints[m.queryIdx].pt for m in good])
+        dst = np.float32([keypoints[m.trainIdx].pt for m in good])
+        H, inliers = cv2.findHomography(src, dst, cv2.RANSAC, getattr(self.config, "BED_RANSAC_REPROJ_THRESH", 3.0))
+        if H is None or inliers is None:
+            return self._reject_candidate(
+                gray,
+                frame_index,
+                0.0,
+                len(good),
+                {"source": "orb", "accepted": False, "reasons": ["homography_failed"], "matches": len(good)},
+                message="tracking lost; ORB relocalization homography failed",
+            )
+        inlier_ratio = float(inliers.sum()) / max(1, len(good))
+        candidate = cv2.perspectiveTransform(self._keyframe_corners.reshape(-1, 1, 2), H).reshape(-1, 2)
+        diagnostics = self.validate_candidate_corners(candidate, inlier_ratio, int(inliers.sum()), source="orb")
+        diagnostics["matches"] = len(good)
+        if diagnostics["accepted"]:
+            self._last_relocalize_frame = frame_index
+            return self._accept_candidate(candidate, gray, frame_index, inlier_ratio, int(inliers.sum()), source="orb")
+        return self._reject_candidate(
+            gray,
+            frame_index,
+            inlier_ratio,
+            int(inliers.sum()),
+            diagnostics,
+            message="tracking lost; ORB relocalization rejected by sanity gate",
+        )
+
+    def _relocalize_due(self, frame_index: int, failed_lk: bool) -> bool:
+        if failed_lk and getattr(self.config, "BED_ORB_RELOCALIZE_ON_FAILURE", True):
+            return True
+        interval = getattr(self.config, "BED_ORB_RELOCALIZE_INTERVAL", 30)
+        return interval > 0 and frame_index - self._last_relocalize_frame >= interval
+
     def update(self, frame_bgr: np.ndarray, frame_index: Optional[int] = None) -> Dict[str, Any]:
         if not self._initialized:
             return self.initialize(frame_bgr, frame_index or 1)
 
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         frame_index = frame_index if frame_index is not None else ((self._frame_index or 0) + 1)
-        message = "tracked"
+        self._frame_index = frame_index
         success = False
+        relocalization_attempted = False
         inlier_ratio = 0.0
         tracked_points = 0
+        diagnostics: Dict[str, Any] = {"source": "lk", "accepted": False, "reasons": ["no_candidate"]}
 
         if self._prev_gray is not None and self._prev_pts is not None and len(self._prev_pts) >= 4:
             curr_pts, status, _ = cv2.calcOpticalFlowPyrLK(
@@ -343,7 +610,7 @@ class BedTracker:
                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
             )
             if curr_pts is not None and status is not None:
-                back_pts, back_status, _ = cv2.calcOpticalFlowPyrLK(
+                back_pts, _, _ = cv2.calcOpticalFlowPyrLK(
                     gray,
                     self._prev_gray,
                     curr_pts,
@@ -367,17 +634,26 @@ class BedTracker:
                     if H_delta is not None and inliers is not None:
                         inlier_count = int(inliers.sum())
                         inlier_ratio = inlier_count / max(1, tracked_points)
-                        new_corners = cv2.perspectiveTransform(
+                        candidate = cv2.perspectiveTransform(
                             self.current_corners.reshape(-1, 1, 2), H_delta
                         ).reshape(-1, 2)
-                        if np.all(np.isfinite(new_corners)):
-                            self.current_corners = new_corners.astype(np.float32)
-                            self._compute_image_to_bed()
+                        diagnostics = self.validate_candidate_corners(candidate, inlier_ratio, inlier_count, source="lk")
+                        if diagnostics["accepted"]:
+                            self._prev_pts = curr_good.reshape(-1, 1, 2).astype(np.float32)
+                            info = self._accept_candidate(candidate, gray, frame_index, inlier_ratio, inlier_count, source="lk")
                             success = True
-        if not success:
-            message = "tracking degraded; using previous homography"
+                        else:
+                            tracked_points = max(tracked_points, inlier_count)
 
-        # Refresh features from the current frame to keep LK well-conditioned for the next decoded frame.
+        if not success and self._relocalize_due(frame_index, failed_lk=True):
+            relocalization_attempted = True
+            info = self._try_relocalize(gray, frame_index)
+            if info and info.get("success"):
+                success = True
+
+        if not success and not relocalization_attempted:
+            info = self._reject_candidate(gray, frame_index, inlier_ratio, tracked_points, diagnostics)
+
         redetect_due = (
             not success
             or tracked_points < getattr(self.config, "BED_MIN_TRACK_POINTS", 20)
@@ -388,23 +664,8 @@ class BedTracker:
             pts = self._detect_features(gray)
             if pts is not None:
                 self._prev_pts = pts
-                tracked_points = max(tracked_points, int(len(pts)))
-        elif success:
-            self._prev_pts = curr_good.reshape(-1, 1, 2).astype(np.float32)
-
         self._prev_gray = gray
-        self._frame_index = frame_index
-        tracking_conf = self._tracking_confidence(inlier_ratio if success else 0.0, tracked_points)
-        self.current_info = BedTrackerInfo(
-            success=success,
-            frame_index=frame_index,
-            corners=self.current_corners.tolist(),
-            inlier_ratio=float(inlier_ratio),
-            tracked_points=int(tracked_points),
-            tracking_confidence=tracking_conf,
-            message=message,
-        ).to_dict()
-        return self.current_info
+        return info
 
     def image_to_bed(self, pt_xy: Sequence[float]) -> Tuple[float, float]:
         if self.H_image_to_bed is None:
@@ -446,7 +707,6 @@ class BedTracker:
         nx, ny = float(norm_xy[0]), float(norm_xy[1])
         if 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0:
             return 1.0
-        # Preserve low-confidence output close to the bed, but make far outside landings weak.
         overflow = max(-nx, nx - 1.0, -ny, ny - 1.0, 0.0)
         return float(max(0.0, 1.0 - overflow / max(0.001, getattr(cfg, "BED_OFF_BED_CONFIDENCE_DECAY", 0.25))))
 

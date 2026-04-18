@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const cornerCount = document.getElementById('corner-count');
     const resetCornersBtn = document.getElementById('reset-corners');
     const confirmCornersBtn = document.getElementById('confirm-corners');
+    const calibrationGeometry = window.TrampolineCalibrationGeometry;
 
     // LLM Elements
     const llmSection = document.getElementById('llm-section');
@@ -68,6 +69,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentVideoId = null;  // module-level for LLM access
     let pendingTrampolineVideoId = null;
     let cornerImage = null;
+    let cornerImageSize = null;
+    let cornerContentRect = null;
     let cornerPoints = [];
     const cornerOrder = ['front_left', 'front_right', 'back_right', 'back_left'];
     const cornerLabels = ['前左', '前右', '后右', '后左'];
@@ -266,6 +269,8 @@ document.addEventListener('DOMContentLoaded', function() {
         analysisCanvas.hidden = true;
         if (cornerStep) cornerStep.classList.add('hidden');
         if (cornerCanvas && cornerCtx) cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
+        cornerContentRect = null;
+        cornerImageSize = null;
         cornerPoints = [];
         pendingTrampolineVideoId = null;
         videoFile = null;
@@ -367,6 +372,25 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
 
+    function updateCornerCanvasSize() {
+        if (!cornerCanvas || !cornerImage || !calibrationGeometry) return;
+        const parentWidth = cornerStep ? cornerStep.clientWidth : 0;
+        const displayWidth = Math.max(320, Math.round(parentWidth || cornerImage.naturalWidth || cornerImage.width));
+        const displayHeight = Math.min(500, Math.max(240, Math.round(displayWidth * 9 / 16)));
+        cornerCanvas.width = displayWidth;
+        cornerCanvas.height = displayHeight;
+        cornerImageSize = {
+            width: cornerImage.naturalWidth || cornerImage.width,
+            height: cornerImage.naturalHeight || cornerImage.height,
+        };
+        cornerContentRect = calibrationGeometry.computeContainRect(
+            cornerImageSize.width,
+            cornerImageSize.height,
+            cornerCanvas.width,
+            cornerCanvas.height
+        );
+    }
+
     function setupCornerCanvas(imageSrc, videoId) {
         if (!cornerStep || !cornerCanvas || !cornerCtx) return;
         cornerStep.classList.remove('hidden');
@@ -374,13 +398,14 @@ document.addEventListener('DOMContentLoaded', function() {
         videoPlayer.hidden = true;
         analysisCanvas.hidden = true;
         cornerPoints = [];
+        cornerContentRect = null;
+        cornerImageSize = null;
         if (cornerCount) cornerCount.textContent = '0/4';
         if (confirmCornersBtn) confirmCornersBtn.disabled = true;
 
         cornerImage = new Image();
         cornerImage.onload = function() {
-            cornerCanvas.width = cornerImage.naturalWidth || cornerImage.width;
-            cornerCanvas.height = cornerImage.naturalHeight || cornerImage.height;
+            updateCornerCanvasSize();
             drawCornerCanvas();
         };
         cornerImage.src = imageSrc;
@@ -388,22 +413,35 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function drawCornerCanvas() {
-        if (!cornerCtx || !cornerImage) return;
+        if (!cornerCtx || !cornerImage || !calibrationGeometry) return;
+        updateCornerCanvasSize();
+        if (!cornerContentRect || !cornerImageSize) return;
         cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-        cornerCtx.drawImage(cornerImage, 0, 0, cornerCanvas.width, cornerCanvas.height);
+        cornerCtx.fillStyle = '#111';
+        cornerCtx.fillRect(0, 0, cornerCanvas.width, cornerCanvas.height);
+        cornerCtx.drawImage(
+            cornerImage,
+            cornerContentRect.x,
+            cornerContentRect.y,
+            cornerContentRect.width,
+            cornerContentRect.height
+        );
         cornerCtx.lineWidth = 3;
         cornerCtx.strokeStyle = '#00d4aa';
         cornerCtx.fillStyle = '#00d4aa';
-        if (cornerPoints.length > 1) {
+        const displayPoints = cornerPoints
+            .map(pt => calibrationGeometry.imageToDisplayPoint(pt, cornerContentRect, cornerImageSize))
+            .filter(Boolean);
+        if (displayPoints.length > 1) {
             cornerCtx.beginPath();
-            cornerCtx.moveTo(cornerPoints[0].x, cornerPoints[0].y);
-            for (let i = 1; i < cornerPoints.length; i++) {
-                cornerCtx.lineTo(cornerPoints[i].x, cornerPoints[i].y);
+            cornerCtx.moveTo(displayPoints[0].x, displayPoints[0].y);
+            for (let i = 1; i < displayPoints.length; i++) {
+                cornerCtx.lineTo(displayPoints[i].x, displayPoints[i].y);
             }
-            if (cornerPoints.length === 4) cornerCtx.closePath();
+            if (displayPoints.length === 4) cornerCtx.closePath();
             cornerCtx.stroke();
         }
-        cornerPoints.forEach((pt, idx) => {
+        displayPoints.forEach((pt, idx) => {
             cornerCtx.beginPath();
             cornerCtx.arc(pt.x, pt.y, 7, 0, Math.PI * 2);
             cornerCtx.fill();
@@ -416,16 +454,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (cornerCanvas) {
         cornerCanvas.addEventListener('click', (e) => {
-            if (!cornerImage || cornerPoints.length >= 4) return;
+            if (!cornerImage || cornerPoints.length >= 4 || !calibrationGeometry) return;
+            updateCornerCanvasSize();
+            if (!cornerContentRect || !cornerImageSize) return;
             const rect = cornerCanvas.getBoundingClientRect();
-            const x = (e.clientX - rect.left) * (cornerCanvas.width / rect.width);
-            const y = (e.clientY - rect.top) * (cornerCanvas.height / rect.height);
-            cornerPoints.push({ name: cornerOrder[cornerPoints.length], x, y });
+            const displayPoint = {
+                x: (e.clientX - rect.left) * (cornerCanvas.width / rect.width),
+                y: (e.clientY - rect.top) * (cornerCanvas.height / rect.height),
+            };
+            const imagePoint = calibrationGeometry.displayToImagePoint(displayPoint, cornerContentRect, cornerImageSize);
+            if (!imagePoint) {
+                addFeedback('warning', '请点击视频画面内的床面角点，黑边区域无效');
+                addLog('Ignored calibration click outside the video image area.', 'warning');
+                return;
+            }
+            cornerPoints.push({ name: cornerOrder[cornerPoints.length], x: imagePoint.x, y: imagePoint.y });
             if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
             if (confirmCornersBtn) confirmCornersBtn.disabled = cornerPoints.length !== 4;
             drawCornerCanvas();
         });
     }
+
+    window.addEventListener('resize', () => {
+        if (cornerStep && !cornerStep.classList.contains('hidden') && cornerImage) {
+            drawCornerCanvas();
+        }
+    });
 
     if (resetCornersBtn) {
         resetCornersBtn.addEventListener('click', () => {
