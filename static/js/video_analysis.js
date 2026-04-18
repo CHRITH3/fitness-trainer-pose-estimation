@@ -535,14 +535,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentKeyframeLabel) currentKeyframeLabel.textContent = '当前帧 0（0.00s）';
         renderKeyframeList();
 
-        cornerImage = new Image();
-        cornerImage.onload = function() {
-            updateCornerCanvasSize();
-            setActiveKeyframeFromVideo(0, 0);
-            drawCornerCanvas();
-        };
-        cornerImage.src = imageSrc;
         pendingTrampolineVideoId = videoId;
+        loadCornerImage(imageSrc, () => setActiveKeyframeFromVideo(0, 0, imageSrc));
     }
 
     function drawCornerCanvas() {
@@ -663,7 +657,6 @@ document.addEventListener('DOMContentLoaded', function() {
         cornerPoints = existing ? existing.corners.map(p => ({ ...p })) : [];
         if (existing && existing.imageSrc && existing.imageSrc !== (cornerImage && cornerImage.src)) {
             activeKeyframe.imageSrc = existing.imageSrc;
-            loadCornerImage(existing.imageSrc);
         }
         if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
         if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
