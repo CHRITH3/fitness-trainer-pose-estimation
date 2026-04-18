@@ -626,12 +626,39 @@ document.addEventListener('DOMContentLoaded', function() {
         return Math.max(0, Math.round((Number(videoPlayer.currentTime) || 0) * 30));
     }
 
-    function setActiveKeyframeFromVideo(frameIndex = null, timeS = null) {
+    function loadCornerImage(imageSrc, afterLoad = null) {
+        if (!imageSrc) return;
+        cornerImage = new Image();
+        cornerImage.onload = function() {
+            updateCornerCanvasSize();
+            if (afterLoad) afterLoad();
+            drawCornerCanvas();
+        };
+        cornerImage.src = imageSrc;
+    }
+
+    function captureCurrentVideoFrameImage() {
+        if (!videoPlayer.videoWidth || !videoPlayer.videoHeight) {
+            return cornerImage ? cornerImage.src : null;
+        }
+        const snap = document.createElement('canvas');
+        snap.width = videoPlayer.videoWidth;
+        snap.height = videoPlayer.videoHeight;
+        const snapCtx = snap.getContext('2d');
+        snapCtx.drawImage(videoPlayer, 0, 0, snap.width, snap.height);
+        return snap.toDataURL('image/png');
+    }
+
+    function setActiveKeyframeFromVideo(frameIndex = null, timeS = null, imageSrc = null) {
         const idx = frameIndex === null ? estimateCurrentFrameIndex() : frameIndex;
         const t = timeS === null ? (Number(videoPlayer.currentTime) || 0) : timeS;
-        activeKeyframe = { frameIndex: Math.max(0, Math.round(idx)), timeS: Math.max(0, t) };
+        activeKeyframe = { frameIndex: Math.max(0, Math.round(idx)), timeS: Math.max(0, t), imageSrc: imageSrc || (cornerImage ? cornerImage.src : null) };
         const existing = calibrationKeyframes.find(k => k.frameIndex === activeKeyframe.frameIndex);
         cornerPoints = existing ? existing.corners.map(p => ({ ...p })) : [];
+        if (existing && existing.imageSrc && existing.imageSrc !== (cornerImage && cornerImage.src)) {
+            activeKeyframe.imageSrc = existing.imageSrc;
+            loadCornerImage(existing.imageSrc);
+        }
         if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
         if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
         if (currentKeyframeLabel) currentKeyframeLabel.textContent = `当前帧 ${activeKeyframe.frameIndex}（${activeKeyframe.timeS.toFixed(2)}s）`;
@@ -656,7 +683,7 @@ document.addEventListener('DOMContentLoaded', function() {
             edit.className = 'btn';
             edit.type = 'button';
             edit.textContent = '重标';
-            edit.addEventListener('click', () => setActiveKeyframeFromVideo(kf.frameIndex, kf.timeS));
+            edit.addEventListener('click', () => setActiveKeyframeFromVideo(kf.frameIndex, kf.timeS, kf.imageSrc));
             const del = document.createElement('button');
             del.className = 'btn';
             del.type = 'button';
@@ -676,7 +703,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (addKeyframeBtn) {
         addKeyframeBtn.addEventListener('click', () => {
             videoPlayer.pause();
-            setActiveKeyframeFromVideo();
+            const imageSrc = captureCurrentVideoFrameImage();
+            if (imageSrc) loadCornerImage(imageSrc);
+            setActiveKeyframeFromVideo(null, null, imageSrc);
             addFeedback('info', '已暂停，请在当前帧点击四个床面角点');
         });
     }
@@ -684,7 +713,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (saveKeyframeBtn) {
         saveKeyframeBtn.addEventListener('click', () => {
             if (!activeKeyframe || cornerPoints.length !== 4) return;
-            const saved = { ...activeKeyframe, corners: cornerPoints.map(p => ({ ...p })) };
+            const saved = { ...activeKeyframe, imageSrc: activeKeyframe.imageSrc || (cornerImage ? cornerImage.src : null), corners: cornerPoints.map(p => ({ ...p })) };
             calibrationKeyframes = calibrationKeyframes.filter(k => k.frameIndex !== saved.frameIndex);
             calibrationKeyframes.push(saved);
             calibrationKeyframes.sort((a, b) => a.frameIndex - b.frameIndex);
