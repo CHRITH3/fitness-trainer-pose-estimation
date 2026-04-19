@@ -45,23 +45,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Trampoline Elements
     const actionCard = document.getElementById('action-card');
     const statAction = document.getElementById('stat-action');
-    const cornerStep = document.getElementById('corner-marking-step');
-    const cornerCanvas = document.getElementById('corner-canvas');
-    const cornerCtx = cornerCanvas ? cornerCanvas.getContext('2d') : null;
-    const cornerCount = document.getElementById('corner-count');
-    const resetCornersBtn = document.getElementById('reset-corners');
-    const saveKeyframeBtn = document.getElementById('save-keyframe');
-    const addKeyframeBtn = document.getElementById('add-keyframe');
-    const keyframeList = document.getElementById('keyframe-list');
-    const currentKeyframeLabel = document.getElementById('current-keyframe-label');
-    const confirmCornersBtn = document.getElementById('confirm-corners');
-    const addCalibrationFrameBtn = document.getElementById('add-calibration-frame');
-    const deleteCalibrationBtn = document.getElementById('delete-calibration');
-    const startTrampolineAnalysisBtn = document.getElementById('start-trampoline-analysis');
-    const calibrationList = document.getElementById('calibration-list');
-    const calibrationDraftLabel = document.getElementById('calibration-draft-label');
-    const calibrationStatusText = document.getElementById('calibration-status-text');
     const calibrationGeometry = window.TrampolineCalibrationGeometry;
+    const trampolineCalibrationUi = window.TrampolineCalibrationUI;
 
     // LLM Elements
     const llmSection = document.getElementById('llm-section');
@@ -77,15 +62,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let analysisInterval = null;
     let exercisesData = {};
     let currentVideoId = null;  // module-level for LLM access
-    let pendingTrampolineVideoId = null;
-    let cornerImage = null;
-    let cornerImageSize = null;
-    let cornerContentRect = null;
-    let cornerPoints = [];
-    let calibrationKeyframes = [];
-    let activeKeyframe = null;
-    const cornerOrder = ['front_left', 'front_right', 'back_right', 'back_left'];
-    const cornerLabels = ['前左', '前右', '后右', '后左'];
+    let trampolineCalibrationController = null;
     let llmEventSource = null;
     let analysisResults = {
         reps: 0,
@@ -279,15 +256,7 @@ document.addEventListener('DOMContentLoaded', function() {
         videoPlayer.src = '';
         uploadArea.hidden = false;
         analysisCanvas.hidden = true;
-        if (cornerStep) cornerStep.classList.add('hidden');
-        if (cornerCanvas && cornerCtx) cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-        cornerContentRect = null;
-        cornerImageSize = null;
-        cornerPoints = [];
-        calibrationKeyframes = [];
-        activeKeyframe = null;
-        renderKeyframeList();
-        pendingTrampolineVideoId = null;
+        if (trampolineCalibrationController) trampolineCalibrationController.reset();
         videoFile = null;
 
         playBtn.disabled = true;
@@ -358,13 +327,19 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.success) {
                 addLog(`Upload complete. Video ID: ${data.video_id}`, 'success');
                 if (isTrampolineMode && data.status === 'uploaded_pending_calibration') {
-                    pendingTrampolineVideoId = data.video_id;
                     currentVideoId = data.video_id;
                     isAnalyzing = false;
                     stopAnalysisBtn.disabled = true;
                     addLog('Trampoline calibration required before analysis starts.', 'info');
                     addFeedback('info', '请预览/暂停视频，在一个或多个关键帧标记床面四角后开始分析');
-                    setupCornerCanvas(data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`, data.video_id);
+                    if (!trampolineCalibrationController) {
+                        throw new Error('Trampoline calibration UI failed to initialize');
+                    }
+                    trampolineCalibrationController.enterPendingCalibration({
+                        videoId: data.video_id,
+                        imageSrc: data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`,
+                        videoFps: data.video_fps,
+                    });
                 } else {
                     addLog('Initializing pose estimation engine...', 'processing');
                     addLog('Starting frame-by-frame analysis...', 'processing');
@@ -387,380 +362,26 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
 
-    function estimateFrameIndex() {
-        const fps = uploadedFrameRate || 30;
-        if (calibrationGeometry && calibrationGeometry.frameIndexFromTime) {
-            return calibrationGeometry.frameIndexFromTime(videoPlayer.currentTime || 0, fps);
-        }
-        return Math.max(0, Math.round((videoPlayer.currentTime || 0) * fps));
-    }
-
-    function formatKeyframe(kf) {
-        const time = Number(kf.time_s || 0).toFixed(2);
-        return `F${kf.frame_index} / ${time}s`;
-    }
-
-    function setDraftImageFromDataUrl(imageSrc, frameIndex, timeS) {
-        if (!cornerStep || !cornerCanvas || !cornerCtx) return;
-        cornerImage = new Image();
-        cornerImage.onload = function() {
-            updateCornerCanvasSize();
-            drawCornerCanvas();
-        };
-        cornerImage.src = imageSrc;
-        activeKeyframeFrame = frameIndex;
-        const existing = calibrationKeyframes.find(kf => kf.frame_index === frameIndex);
-        cornerPoints = existing ? existing.corners_px.map(pt => ({ ...pt })) : [];
-        if (existing && existing.preview_image) {
-            pendingFrameImage = existing.preview_image;
-        }
-        if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
-        if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
-        if (currentKeyframeLabel) currentKeyframeLabel.textContent = `当前关键帧：F${frameIndex} / ${Number(timeS || 0).toFixed(2)}s`;
-    }
-
-    function captureCurrentVideoFrame() {
-        if (!videoPlayer.videoWidth || !videoPlayer.videoHeight) {
-            return pendingFrameImage;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = videoPlayer.videoWidth;
-        canvas.height = videoPlayer.videoHeight;
-        const tmpCtx = canvas.getContext('2d');
-        tmpCtx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL('image/png');
-    }
-
-    function addCalibrationAtCurrentFrame() {
-        if (!pendingTrampolineVideoId) return;
-        videoPlayer.pause();
-        videoPlayer.hidden = false;
-        const frameIndex = estimateFrameIndex();
-        const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
-        const imageSrc = captureCurrentVideoFrame();
-        if (!imageSrc) {
-            addFeedback('warning', '视频帧尚未准备好，请播放或稍等后再添加标定');
+    function initTrampolineCalibrationController() {
+        if (!isTrampolineMode) return;
+        if (!trampolineCalibrationUi || !calibrationGeometry) {
+            addLog('Trampoline calibration UI failed to load.', 'error');
             return;
         }
-        pendingFrameImage = imageSrc;
-        setDraftImageFromDataUrl(imageSrc, frameIndex, timeS);
-        addLog(`Editing trampoline calibration keyframe F${frameIndex} (${timeS.toFixed(2)}s).`, 'info');
-    }
-
-    function renderKeyframeList() {
-        if (!keyframeListEl) return;
-        const sortedKeyframes = calibrationKeyframes.slice().sort((a, b) => a.frame_index - b.frame_index);
-        const payload = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
-            ? calibrationGeometry.buildCalibrationPayload(sortedKeyframes)
-            : sortedKeyframes;
-        keyframeListEl.innerHTML = '';
-        if (!sortedKeyframes.length) {
-            keyframeListEl.innerHTML = '<div class="keyframe-empty">尚未保存关键帧；至少保存 1 个后才能开始分析。</div>';
-        } else {
-            sortedKeyframes.forEach(kf => {
-                const row = document.createElement('div');
-                row.className = 'keyframe-row';
-                row.innerHTML = `<span>${formatKeyframe(kf)} · ${kf.corners_px.length}/4</span>`;
-                const actions = document.createElement('div');
-                actions.className = 'keyframe-row-actions';
-                const relabel = document.createElement('button');
-                relabel.type = 'button';
-                relabel.className = 'btn small-btn';
-                relabel.textContent = '重标';
-                relabel.addEventListener('click', () => {
-                    videoPlayer.pause();
-                    videoPlayer.currentTime = Number(kf.time_s || 0);
-                    setDraftImageFromDataUrl(kf.preview_image || pendingFrameImage || captureCurrentVideoFrame(), kf.frame_index, kf.time_s);
-                });
-                const del = document.createElement('button');
-                del.type = 'button';
-                del.className = 'btn small-btn danger-btn';
-                del.textContent = '删除';
-                del.addEventListener('click', () => {
-                    calibrationKeyframes = calibrationKeyframes.filter(item => item.frame_index !== kf.frame_index);
-                    if (activeKeyframeFrame === kf.frame_index) {
-                        cornerPoints = [];
-                        if (cornerCount) cornerCount.textContent = '0/4';
-                        if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
-                        drawCornerCanvas();
-                    }
-                    renderKeyframeList();
-                });
-                actions.appendChild(relabel);
-                actions.appendChild(del);
-                row.appendChild(actions);
-                keyframeListEl.appendChild(row);
-            });
-        }
-        if (confirmCornersBtn) confirmCornersBtn.disabled = payload.length < 1;
-    }
-
-    function updateCornerCanvasSize() {
-        if (!cornerCanvas || !cornerImage || !calibrationGeometry) return;
-        const parentWidth = cornerStep ? cornerStep.clientWidth : 0;
-        const displayWidth = Math.max(320, Math.round(parentWidth || cornerImage.naturalWidth || cornerImage.width));
-        const displayHeight = Math.min(500, Math.max(240, Math.round(displayWidth * 9 / 16)));
-        cornerCanvas.width = displayWidth;
-        cornerCanvas.height = displayHeight;
-        cornerImageSize = {
-            width: cornerImage.naturalWidth || cornerImage.width,
-            height: cornerImage.naturalHeight || cornerImage.height,
-        };
-        cornerContentRect = calibrationGeometry.computeContainRect(
-            cornerImageSize.width,
-            cornerImageSize.height,
-            cornerCanvas.width,
-            cornerCanvas.height
-        );
-    }
-
-    function setupCornerCanvas(imageSrc, videoId) {
-        if (!cornerStep || !cornerCanvas || !cornerCtx) return;
-        cornerStep.classList.remove('hidden');
-        videoPlayer.pause();
-        videoPlayer.hidden = false;
-        analysisCanvas.hidden = true;
-        calibrationKeyframes = [];
-        cornerPoints = [];
-        calibrationKeyframes = [];
-        activeKeyframe = null;
-        cornerContentRect = null;
-        cornerImageSize = null;
-        pendingFrameImage = imageSrc;
-        pendingTrampolineVideoId = videoId;
-        uploadedFrameRate = Number(videoPlayer.dataset.fps || uploadedFrameRate || 30);
-        if (cornerCount) cornerCount.textContent = '0/4';
-        if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
-        if (confirmCornersBtn) confirmCornersBtn.disabled = true;
-        if (currentKeyframeLabel) currentKeyframeLabel.textContent = '当前帧 0（0.00s）';
-        renderKeyframeList();
-
-        pendingTrampolineVideoId = videoId;
-        loadCornerImage(imageSrc, () => setActiveKeyframeFromVideo(0, 0, imageSrc));
-    }
-
-    function drawCornerCanvas() {
-        if (!cornerCtx || !cornerImage || !calibrationGeometry) return;
-        updateCornerCanvasSize();
-        if (!cornerContentRect || !cornerImageSize) return;
-        cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-        cornerCtx.fillStyle = '#111';
-        cornerCtx.fillRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-        cornerCtx.drawImage(
-            cornerImage,
-            cornerContentRect.x,
-            cornerContentRect.y,
-            cornerContentRect.width,
-            cornerContentRect.height
-        );
-        cornerCtx.lineWidth = 3;
-        cornerCtx.strokeStyle = '#00d4aa';
-        cornerCtx.fillStyle = '#00d4aa';
-        const displayPoints = cornerPoints
-            .map(pt => calibrationGeometry.imageToDisplayPoint(pt, cornerContentRect, cornerImageSize))
-            .filter(Boolean);
-        if (displayPoints.length > 1) {
-            cornerCtx.beginPath();
-            cornerCtx.moveTo(displayPoints[0].x, displayPoints[0].y);
-            for (let i = 1; i < displayPoints.length; i++) {
-                cornerCtx.lineTo(displayPoints[i].x, displayPoints[i].y);
-            }
-            if (displayPoints.length === 4) cornerCtx.closePath();
-            cornerCtx.stroke();
-        }
-        displayPoints.forEach((pt, idx) => {
-            cornerCtx.beginPath();
-            cornerCtx.arc(pt.x, pt.y, 7, 0, Math.PI * 2);
-            cornerCtx.fill();
-            cornerCtx.fillStyle = '#ffffff';
-            cornerCtx.font = '18px sans-serif';
-            cornerCtx.fillText(`${idx + 1}.${cornerLabels[idx]}`, pt.x + 10, pt.y - 10);
-            cornerCtx.fillStyle = '#00d4aa';
-        });
-    }
-
-    if (cornerCanvas) {
-        cornerCanvas.addEventListener('click', (e) => {
-            if (!cornerImage || cornerPoints.length >= 4 || !calibrationGeometry) return;
-            updateCornerCanvasSize();
-            if (!cornerContentRect || !cornerImageSize) return;
-            const rect = cornerCanvas.getBoundingClientRect();
-            const displayPoint = {
-                x: (e.clientX - rect.left) * (cornerCanvas.width / rect.width),
-                y: (e.clientY - rect.top) * (cornerCanvas.height / rect.height),
-            };
-            const imagePoint = calibrationGeometry.displayToImagePoint(displayPoint, cornerContentRect, cornerImageSize);
-            if (!imagePoint) {
-                addFeedback('warning', '请点击视频画面内的床面角点，黑边区域无效');
-                addLog('Ignored calibration click outside the video image area.', 'warning');
-                return;
-            }
-            cornerPoints.push({ name: cornerOrder[cornerPoints.length], x: imagePoint.x, y: imagePoint.y });
-            if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
-            if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
-            drawCornerCanvas();
-        });
-    }
-
-    window.addEventListener('resize', () => {
-        if (cornerStep && !cornerStep.classList.contains('hidden') && cornerImage) {
-            drawCornerCanvas();
-        }
-    });
-
-    if (addKeyframeBtn) {
-        addKeyframeBtn.addEventListener('click', addCalibrationAtCurrentFrame);
-    }
-
-    if (resetCornersBtn) {
-        resetCornersBtn.addEventListener('click', () => {
-            cornerPoints = [];
-            if (cornerCount) cornerCount.textContent = '0/4';
-            if (saveKeyframeBtn) saveKeyframeBtn.disabled = true;
-            drawCornerCanvas();
-        });
-    }
-
-    function estimateCurrentFrameIndex() {
-        // Browser APIs expose time reliably; store frame_index as a best-effort 30fps estimate and preserve time_s too.
-        return Math.max(0, Math.round((Number(videoPlayer.currentTime) || 0) * 30));
-    }
-
-    function loadCornerImage(imageSrc, afterLoad = null) {
-        if (!imageSrc) return;
-        cornerImage = new Image();
-        cornerImage.onload = function() {
-            updateCornerCanvasSize();
-            if (afterLoad) afterLoad();
-            drawCornerCanvas();
-        };
-        cornerImage.src = imageSrc;
-    }
-
-    function captureCurrentVideoFrameImage() {
-        if (!videoPlayer.videoWidth || !videoPlayer.videoHeight) {
-            return cornerImage ? cornerImage.src : null;
-        }
-        const snap = document.createElement('canvas');
-        snap.width = videoPlayer.videoWidth;
-        snap.height = videoPlayer.videoHeight;
-        const snapCtx = snap.getContext('2d');
-        snapCtx.drawImage(videoPlayer, 0, 0, snap.width, snap.height);
-        return snap.toDataURL('image/png');
-    }
-
-    function setActiveKeyframeFromVideo(frameIndex = null, timeS = null, imageSrc = null) {
-        const idx = frameIndex === null ? estimateCurrentFrameIndex() : frameIndex;
-        const t = timeS === null ? (Number(videoPlayer.currentTime) || 0) : timeS;
-        activeKeyframe = { frameIndex: Math.max(0, Math.round(idx)), timeS: Math.max(0, t), imageSrc: imageSrc || (cornerImage ? cornerImage.src : null) };
-        const existing = calibrationKeyframes.find(k => k.frameIndex === activeKeyframe.frameIndex);
-        cornerPoints = existing ? existing.corners.map(p => ({ ...p })) : [];
-        if (existing && existing.imageSrc && existing.imageSrc !== (cornerImage && cornerImage.src)) {
-            activeKeyframe.imageSrc = existing.imageSrc;
-        }
-        if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
-        if (saveKeyframeBtn) saveKeyframeBtn.disabled = cornerPoints.length !== 4;
-        if (currentKeyframeLabel) currentKeyframeLabel.textContent = `当前帧 ${activeKeyframe.frameIndex}（${activeKeyframe.timeS.toFixed(2)}s）`;
-        drawCornerCanvas();
-        renderKeyframeList();
-    }
-
-    function renderKeyframeList() {
-        if (!keyframeList) return;
-        keyframeList.innerHTML = '';
-        const payload = calibrationGeometry && calibrationGeometry.buildCalibrationPayload
-            ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes)
-            : [];
-        if (confirmCornersBtn) confirmCornersBtn.disabled = payload.length < 1;
-        calibrationKeyframes.slice().sort((a, b) => a.frameIndex - b.frameIndex).forEach(kf => {
-            const item = document.createElement('div');
-            item.className = `keyframe-item ${activeKeyframe && activeKeyframe.frameIndex === kf.frameIndex ? 'active' : ''}`;
-            item.innerHTML = `<span>帧 ${kf.frameIndex} · ${kf.timeS.toFixed(2)}s · ${kf.corners.length}/4</span>`;
-            const actions = document.createElement('div');
-            actions.className = 'keyframe-item-actions';
-            const edit = document.createElement('button');
-            edit.className = 'btn';
-            edit.type = 'button';
-            edit.textContent = '重标';
-            edit.addEventListener('click', () => setActiveKeyframeFromVideo(kf.frameIndex, kf.timeS, kf.imageSrc));
-            const del = document.createElement('button');
-            del.className = 'btn';
-            del.type = 'button';
-            del.textContent = '删除';
-            del.addEventListener('click', () => {
-                calibrationKeyframes = calibrationKeyframes.filter(item => item.frameIndex !== kf.frameIndex);
-                if (activeKeyframe && activeKeyframe.frameIndex === kf.frameIndex) cornerPoints = [];
-                renderKeyframeList();
-                drawCornerCanvas();
-            });
-            actions.append(edit, del);
-            item.appendChild(actions);
-            keyframeList.appendChild(item);
-        });
-    }
-
-    if (addKeyframeBtn) {
-        addKeyframeBtn.addEventListener('click', () => {
-            videoPlayer.pause();
-            const imageSrc = captureCurrentVideoFrameImage();
-            if (imageSrc) loadCornerImage(imageSrc);
-            setActiveKeyframeFromVideo(null, null, imageSrc);
-            addFeedback('info', '已暂停，请在当前帧点击四个床面角点');
-        });
-    }
-
-    if (saveKeyframeBtn) {
-        saveKeyframeBtn.addEventListener('click', () => {
-            if (activeKeyframeFrame === null || cornerPoints.length !== 4) return;
-            const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
-            const keyframe = {
-                frame_index: activeKeyframeFrame,
-                time_s: timeS,
-                preview_image: captureCurrentVideoFrame() || pendingFrameImage,
-                corners_px: cornerPoints.map((pt, idx) => ({ name: cornerOrder[idx], x: pt.x, y: pt.y })),
-            };
-            calibrationKeyframes = calibrationKeyframes.filter(kf => kf.frame_index !== activeKeyframeFrame);
-            calibrationKeyframes.push(keyframe);
-            calibrationKeyframes.sort((a, b) => a.frame_index - b.frame_index);
-            addLog(`Saved calibration keyframe ${formatKeyframe(keyframe)}.`, 'success');
-            renderKeyframeList();
-            addLog(`Saved trampoline calibration keyframe ${saved.frameIndex}.`, 'success');
-        });
-    }
-
-    if (confirmCornersBtn) {
-        confirmCornersBtn.addEventListener('click', async () => {
-            const calibrations = calibrationGeometry && calibrationGeometry.buildCalibrationPayload ? calibrationGeometry.buildCalibrationPayload(calibrationKeyframes) : [];
-            if (!pendingTrampolineVideoId || calibrations.length < 1) return;
-            confirmCornersBtn.disabled = true;
-            addLog('Submitting bed keyframe calibrations...', 'processing');
-            try {
-                const response = await fetch('/api/video/trampoline/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ video_id: pendingTrampolineVideoId, calibrations })
-                });
-                const data = await response.json();
-                if (!data.success) {
-                    addLog(`Calibration failed: ${data.error}`, 'error');
-                    addFeedback('error', `Calibration failed: ${data.error}`);
-                    confirmCornersBtn.disabled = false;
-                    return;
-                }
-                addLog(`Calibration accepted (${calibrations.length} keyframe(s)). Starting frame-by-frame analysis...`, 'success');
-                addFeedback('success', 'Calibration accepted. Processing...');
-                if (cornerStep) cornerStep.classList.add('hidden');
-                videoPlayer.hidden = false;
+        trampolineCalibrationController = trampolineCalibrationUi.createController({
+            documentRef: document,
+            videoPlayer,
+            analysisCanvas,
+            geometry: calibrationGeometry,
+            onLog: addLog,
+            onFeedback: addFeedback,
+            onProcessingStart: ({ videoId }) => {
                 isAnalyzing = true;
                 analysisResults.startTime = new Date();
                 stopAnalysisBtn.disabled = false;
                 setTerminalStatus('Processing', 'running');
-                startAnalysisPolling(pendingTrampolineVideoId);
-            } catch (error) {
-                addLog(`Calibration request failed: ${error.message}`, 'error');
-                addFeedback('error', 'Failed to submit calibration');
-                confirmCornersBtn.disabled = false;
-            }
+                startAnalysisPolling(videoId);
+            },
         });
     }
 
@@ -1029,6 +650,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         analysisResults.feedbacks.push({ time: timeStr, type, message });
     }
+
+    initTrampolineCalibrationController();
 
     // Show final report
     function showReport(data) {

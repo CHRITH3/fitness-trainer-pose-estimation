@@ -50,6 +50,29 @@ def upload_trampoline(client, tmp_path):
     return payload["video_id"]
 
 
+def test_trampoline_upload_returns_pending_calibration_contract_fields(tmp_path):
+    client = app_module.app.test_client()
+    data = {
+        "exercise_type": "trampoline",
+        "video": (io.BytesIO(make_video_bytes(tmp_path)), "sample.mp4"),
+    }
+
+    response = client.post("/api/video/upload", data=data, content_type="multipart/form-data")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["status"] == "uploaded_pending_calibration"
+    assert payload["message"]
+    assert payload["video_id"]
+    assert payload["first_frame_image"].startswith("data:image/png;base64,")
+    assert payload["first_frame_b64"]
+    assert payload["image_size"] == {"width": 64, "height": 64}
+    assert payload["video_fps"] == 5.0
+    assert payload["total_frames"] == 5
+    assert payload["corner_order"] == app_module.TRAMPOLINE_CORNER_ORDER
+
+
 def test_trampoline_upload_start_and_processing_idempotency(tmp_path):
     client = app_module.app.test_client()
     video_id = upload_trampoline(client, tmp_path)
