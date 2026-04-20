@@ -4,7 +4,7 @@ This file provides guidance to Codex when working with code in this repository.
 
 ## Project Overview
 
-This repository is now a **trampoline-only** video analysis project.
+This repository is a **trampoline-only** video analysis project.
 
 **Current product surface:**
 - trampoline video upload and direct-on-video calibration
@@ -61,7 +61,7 @@ python video_processor.py <video_path> trampoline <output_json> [output_video]
 
 ### Video processing flow
 
-`video_processor.py` is kept as the stable subprocess entrypoint. It is now expected to process **trampoline-only** jobs.
+`video_processor.py` is kept as the stable subprocess entrypoint. It processes **trampoline-only** jobs.
 
 Flow:
 1. `/api/video/upload`
@@ -73,15 +73,15 @@ Flow:
 
 ## Notes
 
-- Some historical notes may still mention the older mixed-product era; prefer the current trampoline-only route/API contract over older wording.
 - MediaPipe is pinned to 0.10.9.
 - Keep public URLs stable: `/`, `/dashboard`, `/profile`, `/video_analysis`.
 - Placeholder dashboard/profile pages are intentional; they preserve future trampoline product expansion space.
 
 ## Workflow Conventions
 
-- **Git 提交**：提交信息遵循仓库 Lore protocol，用提交正文记录约束、取舍、验证与风险
-- **任务文档**：当任务会改变产品语义、架构约定或清理范围时，在 `trampoline/docs/` 目录下补充中文执行说明，命名规则为 `YYYY-MM-DD-≤10字中文任务简介.md`
+- **Git 提交**：提交信息遵循仓库 Lore protocol，用提交正文记录约束、取舍、验证与风险。
+- **任务文档**：当任务会改变产品语义、架构约定或清理范围时，在 `trampoline/docs/` 目录下补充中文执行说明，命名规则为 `YYYY-MM-DD-≤10字中文任务简介.md`。
+- **任务文档写法**：任务说明文档不只记录“改了什么”，还要尽量讲清：任务目标、问题来源、方案选择理由、改动落点（文件/模块）、验证结果、后续优化方向；至少补充一个与真实代码结构绑定的教学点，解释为什么这样拆/这样写，并帮助有 MCU C 背景的读者理解 HTML / JS / CSS / Python 思路。保持“强教学，但不是完整教程”。
 - **AGENTS.md 同步**：当发生以下变更时，主动提醒用户是否需要更新 AGENTS.md：
   - 新增或删除核心模块/组件
   - 技术栈变化（换框架、升级有 breaking change 的依赖）
