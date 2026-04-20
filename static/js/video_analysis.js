@@ -1,11 +1,6 @@
-// Video Analysis Page JavaScript
+// Trampoline-only video analysis page JavaScript
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Mode detection
-    const pageMode = document.querySelector('.container').dataset.mode || 'fitness';
-    const isTrampolineMode = (pageMode === 'trampoline');
-
-    // Elements
     const uploadArea = document.getElementById('upload-area');
     const videoInput = document.getElementById('video-input');
     const browseBtn = document.getElementById('browse-btn');
@@ -20,15 +15,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressFill = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
 
-    const exerciseSelect = document.getElementById('exercise-select');
-    const exerciseInfoPanel = document.getElementById('exercise-info-panel');
-    const miniType = document.getElementById('mini-type');
-    const miniDescription = document.getElementById('mini-description');
-
     const statReps = document.getElementById('stat-reps');
     const statScore = document.getElementById('stat-score');
     const statGrade = document.getElementById('stat-grade');
     const statState = document.getElementById('stat-state');
+    const statAction = document.getElementById('stat-action');
     const gaugeFill = document.getElementById('gauge-fill');
     const gaugeValue = document.getElementById('gauge-value');
     const feedbackLog = document.getElementById('feedback-log');
@@ -36,19 +27,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const reportContent = document.getElementById('report-content');
     const downloadReportBtn = document.getElementById('download-report-btn');
 
-    // Terminal Elements
     const terminalContent = document.getElementById('terminal-content');
     const terminalStatus = document.getElementById('terminal-status');
     const terminalToggle = document.getElementById('terminal-toggle');
     const terminalBody = document.getElementById('terminal-body');
 
-    // Trampoline Elements
-    const actionCard = document.getElementById('action-card');
-    const statAction = document.getElementById('stat-action');
-    const calibrationGeometry = window.TrampolineCalibrationGeometry;
-    const trampolineCalibrationUi = window.TrampolineCalibrationUI;
-
-    // LLM Elements
     const llmSection = document.getElementById('llm-section');
     const llmBtn = document.getElementById('llm-btn');
     const llmStreaming = document.getElementById('llm-streaming');
@@ -56,14 +39,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const llmCards = document.getElementById('llm-cards');
     const llmToggleRaw = document.getElementById('llm-toggle-raw');
 
-    // State
+    const calibrationGeometry = window.TrampolineCalibrationGeometry;
+    const trampolineCalibrationUi = window.TrampolineCalibrationUI;
+
     let videoFile = null;
     let isAnalyzing = false;
     let analysisInterval = null;
-    let exercisesData = {};
-    let currentVideoId = null;  // module-level for LLM access
+    let currentVideoId = null;
     let trampolineCalibrationController = null;
     let llmEventSource = null;
+    let lastProgress = 0;
+
     let analysisResults = {
         reps: 0,
         scores: [],
@@ -73,21 +59,14 @@ document.addEventListener('DOMContentLoaded', function() {
         completedJumps: [],
     };
 
-    // ==================== Mode Initialization ====================
-    if (isTrampolineMode) {
-        document.getElementById('fitness-selector').classList.add('hidden');
-        document.getElementById('trampoline-selector').classList.remove('hidden');
-        document.getElementById('count-label').textContent = 'Jumps';
-        document.getElementById('state-label').textContent = 'Phase';
-        actionCard.classList.remove('hidden');
-    } else {
-        loadExercises();
-    }
-
-    // ==================== Terminal/Log Functions ====================
     function getTimestamp() {
         const now = new Date();
-        return now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        return now.toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+        });
     }
 
     function addLog(message, type = 'info') {
@@ -103,89 +82,242 @@ document.addEventListener('DOMContentLoaded', function() {
         terminalStatus.className = `terminal-status ${type}`;
     }
 
-    function clearTerminal() {
-        terminalContent.innerHTML = '<div class="log-line info"><span class="timestamp">[' + getTimestamp() + ']</span> Terminal cleared. Ready for new analysis...</div>';
+    function addFeedback(type, message) {
+        const now = new Date();
+        const timeStr = `${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+        const item = document.createElement('div');
+        item.className = `feedback-item ${type}`;
+        item.innerHTML = `<span class="feedback-time">${timeStr}</span><span class="feedback-text">${message}</span>`;
+        feedbackLog.insertBefore(item, feedbackLog.firstChild);
+        while (feedbackLog.children.length > 50) {
+            feedbackLog.removeChild(feedbackLog.lastChild);
+        }
+        analysisResults.feedbacks.push({ time: timeStr, type, message });
     }
 
-    // Terminal toggle
-    if (terminalToggle) {
-        terminalToggle.addEventListener('click', function() {
-            terminalBody.classList.toggle('collapsed');
-            terminalToggle.classList.toggle('collapsed');
+    function resetStats() {
+        statReps.textContent = '0';
+        statScore.textContent = '--';
+        statGrade.textContent = '--';
+        statGrade.className = 'stat-value grade';
+        statState.textContent = '--';
+        statAction.textContent = '--';
+        statAction.className = 'stat-value action-name';
+        gaugeValue.textContent = '--';
+        gaugeFill.style.strokeDashoffset = 251.2;
+        gaugeFill.style.stroke = '#27ae60';
+        progressFill.style.width = '0%';
+        progressText.textContent = '0%';
+    }
+
+    function stopAnalysis() {
+        isAnalyzing = false;
+        lastProgress = 0;
+        if (analysisInterval) {
+            clearInterval(analysisInterval);
+            analysisInterval = null;
+        }
+        videoPlayer.pause();
+        analyzeBtn.disabled = !videoFile;
+        stopAnalysisBtn.disabled = true;
+    }
+
+    function simpleMd(text) {
+        return text
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/^## (.+)$/gm, '<div style="font-weight:700;color:#00d4aa;margin:8px 0 4px">$1</div>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function showTrampolineReport(data) {
+        const jumps = data.completed_jumps || analysisResults.completedJumps || [];
+        const jumpCount = data.reps || jumps.length;
+        const duration = analysisResults.endTime && analysisResults.startTime
+            ? Math.round((analysisResults.endTime - analysisResults.startTime) / 1000)
+            : 0;
+
+        const actionCounts = {};
+        const realJumps = jumps.filter(j => !j.is_intermediate);
+        realJumps.forEach(j => {
+            actionCounts[j.action] = (actionCounts[j.action] || 0) + 1;
         });
-    }
+        const actionBreakdown = Object.entries(actionCounts)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('，') || '—';
 
-    // Initialize terminal
-    addLog('System initialized. Ready for video upload.', 'info');
-
-    // Exercise type info
-    const exerciseTypeInfo = {
-        'bilateral': { label: 'Bilateral', color: '#9b59b6', class: 'bilateral' },
-        'duration': { label: 'Duration', color: '#e67e22', class: 'duration' },
-        'standard': { label: 'Standard', color: '#3498db', class: 'standard' }
-    };
-
-    // Load exercises (fitness mode only)
-    async function loadExercises() {
-        try {
-            addLog('Loading available exercises...', 'info');
-            const response = await fetch('/exercises');
-            const data = await response.json();
-            exercisesData = data;
-
-            data.exercises.forEach(exercise => {
-                const info = data.info[exercise] || {};
-                const option = document.createElement('option');
-                option.value = exercise;
-                option.textContent = info.name || exercise.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                exerciseSelect.appendChild(option);
-            });
-            addLog(`Loaded ${data.exercises.length} exercises successfully.`, 'success');
-        } catch (error) {
-            console.error('Error loading exercises:', error);
-            addLog(`Error loading exercises: ${error.message}`, 'error');
+        function fmtNum(value, digits = 2) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n.toFixed(digits) : String(value ?? '?');
         }
-    }
 
-    // Exercise selection change (fitness mode)
-    exerciseSelect.addEventListener('change', function() {
-        const exercise = this.value;
-        if (exercise && exercisesData.info[exercise]) {
-            const info = exercisesData.info[exercise];
-            const typeInfo = exerciseTypeInfo[info.type] || exerciseTypeInfo['standard'];
-            addLog(`Selected exercise: ${info.name || exercise} (${info.type})`, 'info');
-
-            miniType.textContent = typeInfo.label;
-            miniType.className = `mini-badge ${typeInfo.class}`;
-            miniDescription.textContent = info.description || 'No description available';
-            exerciseInfoPanel.classList.remove('hidden');
-
-            if (videoFile) {
-                analyzeBtn.disabled = false;
+        let jumpDetails = '';
+        realJumps.forEach((jump, i) => {
+            const landing = jump.landing;
+            let landingText = '落点：--';
+            if (landing) {
+                const xy = landing.bed_xy_m || ['?', '?'];
+                const conf = landing.confidence !== undefined ? Number(landing.confidence).toFixed(2) : '--';
+                const low = landing.confidence !== undefined && Number(landing.confidence) < 0.5;
+                landingText = `落点：(${fmtNum(xy[0])}, ${fmtNum(xy[1])})m / ${landing.zone || '--'} / conf ${conf}${low ? ' <span class="landing-low-confidence">低置信</span>' : ''}`;
             }
-        } else {
-            exerciseInfoPanel.classList.add('hidden');
-            analyzeBtn.disabled = true;
-        }
-    });
+            jumpDetails += `
+                <div class="report-row">
+                    <span class="report-label">第 ${jump.jump_number || (i + 1)} 跳</span>
+                    <span class="report-value">${jump.action} <span class="jump-flight-info">(${jump.flight_frames} 帧)</span><br><small>${landingText}</small></span>
+                </div>`;
+        });
 
-    // File upload handling
+        const intermediateCount = jumps.filter(j => j.is_intermediate).length;
+
+        reportContent.innerHTML = `
+            <div class="report-row"><span class="report-label">分析类型</span><span class="report-value">蹦床</span></div>
+            <div class="report-row"><span class="report-label">总跳次</span><span class="report-value">${jumpCount}</span></div>
+            ${intermediateCount > 0 ? `<div class="report-row"><span class="report-label">中间过渡跳</span><span class="report-value">${intermediateCount}</span></div>` : ''}
+            <div class="report-row"><span class="report-label">动作分布</span><span class="report-value">${actionBreakdown}</span></div>
+            ${jumpDetails}
+            <div class="report-row"><span class="report-label">处理耗时</span><span class="report-value">${duration}s</span></div>
+        `;
+        reportSection.classList.remove('hidden');
+        llmSection.classList.remove('hidden');
+        llmBtn.disabled = false;
+    }
+
+    function updateStats(data) {
+        if (data.reps !== undefined) {
+            statReps.textContent = data.reps;
+            analysisResults.reps = data.reps;
+        }
+        if (data.form_score !== undefined) {
+            const score = Math.round(data.form_score);
+            statScore.textContent = score;
+            gaugeValue.textContent = score;
+            analysisResults.scores.push(score);
+            gaugeFill.style.strokeDashoffset = 251.2 - (251.2 * score / 100);
+        }
+        if (data.grade !== undefined) {
+            statGrade.textContent = data.grade;
+            statGrade.className = `stat-value grade${data.grade ? ` grade-${String(data.grade).toLowerCase()}` : ''}`;
+        }
+        if (data.state !== undefined) {
+            statState.textContent = data.state;
+        }
+        if (data.current_action !== undefined) {
+            statAction.textContent = data.current_action;
+            statAction.className = `stat-value action-name action-${String(data.current_action).toLowerCase()}`;
+        }
+    }
+
+    function startAnalysisPolling(videoId) {
+        currentVideoId = videoId;
+        analysisCanvas.width = videoPlayer.videoWidth || 640;
+        analysisCanvas.height = videoPlayer.videoHeight || 480;
+        analysisCanvas.hidden = false;
+        ctx.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
+
+        videoPlayer.currentTime = 0;
+        videoPlayer.play();
+
+        analysisInterval = setInterval(async () => {
+            if (!isAnalyzing) {
+                clearInterval(analysisInterval);
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/video/status/${videoId}`);
+                const data = await response.json();
+
+                if (data.status === 'processing') {
+                    progressFill.style.width = `${data.progress}%`;
+                    progressText.textContent = `处理中：${Math.round(data.progress)}%`;
+                    const currentProgress = Math.floor(data.progress / 10) * 10;
+                    if (currentProgress > lastProgress && currentProgress > 0) {
+                        addLog(`进度：${currentProgress}% | 跳次：${data.reps || 0} | 动作：${data.current_action || '--'}`, 'progress');
+                        lastProgress = currentProgress;
+                    }
+                    updateStats(data);
+                } else if (data.status === 'completed') {
+                    clearInterval(analysisInterval);
+                    analysisResults.endTime = new Date();
+                    analysisResults.completedJumps = data.completed_jumps || [];
+                    updateStats(data);
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '100%';
+                    addLog('分析完成。', 'success');
+                    addFeedback('success', '分析完成，正在展示结果');
+                    setTerminalStatus('Completed', 'success');
+                    if (data.has_processed_video && data.processed_video_url) {
+                        videoPlayer.src = data.processed_video_url;
+                        videoPlayer.load();
+                        videoPlayer.play();
+                    }
+                    showTrampolineReport(data);
+                    stopAnalysis();
+                } else if (data.status === 'error') {
+                    clearInterval(analysisInterval);
+                    addLog(`分析失败：${data.error}`, 'error');
+                    addFeedback('error', `分析失败：${data.error}`);
+                    setTerminalStatus('Error', 'error');
+                    stopAnalysis();
+                }
+            } catch (error) {
+                addLog(`轮询失败：${error.message}`, 'warning');
+            }
+        }, 200);
+    }
+
+    function resetPageState() {
+        stopAnalysis();
+        videoPlayer.hidden = true;
+        videoPlayer.pause();
+        videoPlayer.src = '';
+        uploadArea.hidden = false;
+        analysisCanvas.hidden = true;
+        if (trampolineCalibrationController) trampolineCalibrationController.reset();
+        videoFile = null;
+        currentVideoId = null;
+        playBtn.disabled = true;
+        analyzeBtn.disabled = true;
+        resetBtn.disabled = true;
+        reportSection.classList.add('hidden');
+        feedbackLog.innerHTML = '<div class="feedback-item info"><span class="feedback-time">--:--</span><span class="feedback-text">上传蹦床视频并开始分析后，这里会显示过程反馈。</span></div>';
+        if (llmEventSource) {
+            llmEventSource.close();
+            llmEventSource = null;
+        }
+        llmSection.classList.add('hidden');
+        llmStreaming.classList.add('hidden');
+        llmCards.classList.add('hidden');
+        llmCards.classList.remove('visible');
+        llmStreamingText.innerHTML = '';
+        llmToggleRaw.classList.add('hidden');
+        llmBtn.disabled = true;
+        resetStats();
+    }
+
+    function handleVideoFile(file) {
+        videoFile = file;
+        videoPlayer.src = URL.createObjectURL(file);
+        videoPlayer.hidden = false;
+        uploadArea.hidden = true;
+        playBtn.disabled = false;
+        analyzeBtn.disabled = false;
+        resetBtn.disabled = false;
+        addLog(`已加载视频：${file.name}`, 'success');
+        addLog(`文件大小：${(file.size / (1024 * 1024)).toFixed(2)} MB`, 'info');
+        addFeedback('info', `已加载视频：${file.name}`);
+    }
+
     browseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         videoInput.click();
     });
-
     uploadArea.addEventListener('click', () => videoInput.click());
-
     uploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
         uploadArea.classList.add('dragover');
     });
-
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-    });
-
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
     uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
         uploadArea.classList.remove('dragover');
@@ -194,176 +326,95 @@ document.addEventListener('DOMContentLoaded', function() {
             handleVideoFile(files[0]);
         }
     });
-
     videoInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
             handleVideoFile(e.target.files[0]);
         }
     });
 
-    function handleVideoFile(file) {
-        videoFile = file;
-        const url = URL.createObjectURL(file);
-        videoPlayer.src = url;
-        videoPlayer.hidden = false;
-        uploadArea.hidden = true;
-
-        playBtn.disabled = false;
-        resetBtn.disabled = false;
-
-        if (isTrampolineMode || exerciseSelect.value) {
-            analyzeBtn.disabled = false;
-        }
-
-        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
-        addLog(`Video file loaded: ${file.name}`, 'success');
-        addLog(`File size: ${fileSizeMB} MB | Type: ${file.type}`, 'info');
-
-        addFeedback('info', `Video loaded: ${file.name}`);
-    }
-
-    // Video controls
     playBtn.addEventListener('click', () => {
         if (videoPlayer.paused) {
             videoPlayer.play();
-            playBtn.textContent = 'Pause';
+            playBtn.textContent = '⏸️ Pause';
         } else {
             videoPlayer.pause();
-            playBtn.textContent = 'Play';
+            playBtn.textContent = '▶️ Play';
         }
     });
-
     videoPlayer.addEventListener('play', () => {
-        playBtn.textContent = 'Pause';
+        playBtn.textContent = '⏸️ Pause';
     });
-
     videoPlayer.addEventListener('pause', () => {
-        playBtn.textContent = 'Play';
+        playBtn.textContent = '▶️ Play';
     });
-
     videoPlayer.addEventListener('timeupdate', () => {
-        if (!isAnalyzing && videoPlayer.duration && !isNaN(videoPlayer.duration)) {
+        if (!isAnalyzing && videoPlayer.duration && !Number.isNaN(videoPlayer.duration)) {
             const progress = (videoPlayer.currentTime / videoPlayer.duration) * 100;
             progressFill.style.width = `${progress}%`;
             progressText.textContent = `${Math.round(progress)}%`;
         }
     });
 
-    // Reset
-    resetBtn.addEventListener('click', () => {
-        stopAnalysis();
-        videoPlayer.hidden = true;
-        videoPlayer.src = '';
-        uploadArea.hidden = false;
-        analysisCanvas.hidden = true;
-        if (trampolineCalibrationController) trampolineCalibrationController.reset();
-        videoFile = null;
+    resetBtn.addEventListener('click', resetPageState);
 
-        playBtn.disabled = true;
-        analyzeBtn.disabled = true;
-        resetBtn.disabled = true;
-
-        resetStats();
-        reportSection.classList.add('hidden');
-        feedbackLog.innerHTML = '<div class="feedback-item info"><span class="feedback-time">--:--</span><span class="feedback-text">Upload a video and start analysis to see feedback</span></div>';
-        // Reset LLM
-        if (llmEventSource) { llmEventSource.close(); llmEventSource = null; }
-        currentVideoId = null;
-        if (llmSection) llmSection.classList.add('hidden');
-        if (llmStreaming) llmStreaming.classList.add('hidden');
-        if (llmCards) { llmCards.classList.add('hidden'); llmCards.classList.remove('visible'); }
-        if (llmStreamingText) llmStreamingText.innerHTML = '';
-        if (llmToggleRaw) llmToggleRaw.classList.add('hidden');
-        if (llmBtn) llmBtn.disabled = true;
-    });
-
-    // Start Analysis
     analyzeBtn.addEventListener('click', async () => {
         if (!videoFile) return;
-        if (!isTrampolineMode && !exerciseSelect.value) return;
 
         isAnalyzing = true;
         analyzeBtn.disabled = true;
         stopAnalysisBtn.disabled = false;
-        if (!isTrampolineMode) exerciseSelect.disabled = true;
+        analysisResults = { reps: 0, scores: [], feedbacks: [], startTime: new Date(), endTime: null, completedJumps: [] };
 
-        analysisResults = {
-            reps: 0,
-            scores: [],
-            feedbacks: [],
-            startTime: new Date(),
-            endTime: null,
-            completedJumps: [],
-        };
-
-        // Terminal logs
         setTerminalStatus('Processing', 'running');
-        addLog('Starting video analysis...', 'processing');
-        if (isTrampolineMode) {
-            addLog('Mode: Trampoline Analysis', 'info');
-        } else {
-            addLog(`Exercise: ${exerciseSelect.options[exerciseSelect.selectedIndex].text}`, 'info');
-        }
-        addLog(`Video: ${videoFile.name}`, 'info');
+        addLog('开始蹦床视频分析...', 'processing');
+        addLog(`视频文件：${videoFile.name}`, 'info');
+        addFeedback('info', '正在上传视频，请稍候');
 
-        const analysisLabel = isTrampolineMode ? 'Trampoline Analysis' :
-            exerciseSelect.options[exerciseSelect.selectedIndex].text;
-        addFeedback('info', `Starting analysis: ${analysisLabel}`);
-
-        // Upload video and start analysis
         const formData = new FormData();
         formData.append('video', videoFile);
-        formData.append('exercise_type', isTrampolineMode ? 'trampoline' : exerciseSelect.value);
-
-        addLog('Uploading video to server...', 'processing');
+        formData.append('exercise_type', 'trampoline');
 
         try {
-            const response = await fetch('/api/video/upload', {
-                method: 'POST',
-                body: formData
-            });
-
+            const response = await fetch('/api/video/upload', { method: 'POST', body: formData });
             const data = await response.json();
-            if (data.success) {
-                addLog(`Upload complete. Video ID: ${data.video_id}`, 'success');
-                if (isTrampolineMode && data.status === 'uploaded_pending_calibration') {
-                    currentVideoId = data.video_id;
-                    isAnalyzing = false;
-                    stopAnalysisBtn.disabled = true;
-                    addLog('Trampoline calibration required before analysis starts.', 'info');
-                    addFeedback('info', '请预览/暂停视频，在一个或多个关键帧标记床面四角后开始分析');
-                    if (!trampolineCalibrationController) {
-                        throw new Error('Trampoline calibration UI failed to initialize');
-                    }
-                    trampolineCalibrationController.enterPendingCalibration({
-                        videoId: data.video_id,
-                        imageSrc: data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`,
-                        videoFps: data.video_fps,
-                    });
-                } else {
-                    addLog('Initializing pose estimation engine...', 'processing');
-                    addLog('Starting frame-by-frame analysis...', 'processing');
-                    addFeedback('success', 'Video uploaded successfully. Processing...');
-                    startAnalysisPolling(data.video_id);
-                }
-            } else {
-                addLog(`Upload failed: ${data.error}`, 'error');
+            if (!data.success) {
+                addLog(`上传失败：${data.error}`, 'error');
+                addFeedback('error', `上传失败：${data.error}`);
                 setTerminalStatus('Error', 'error');
-                addFeedback('error', `Upload failed: ${data.error}`);
                 stopAnalysis();
+                return;
             }
+
+            addLog(`上传完成，视频 ID：${data.video_id}`, 'success');
+            currentVideoId = data.video_id;
+            isAnalyzing = false;
+            stopAnalysisBtn.disabled = true;
+            addLog('请先完成床面关键帧标定，再启动分析。', 'info');
+            addFeedback('info', '请预览/暂停视频，在一个或多个关键帧标记床面四角后开始分析');
+            if (!trampolineCalibrationController) {
+                throw new Error('Trampoline calibration UI failed to initialize');
+            }
+            trampolineCalibrationController.enterPendingCalibration({
+                videoId: data.video_id,
+                imageSrc: data.first_frame_image || `data:image/png;base64,${data.first_frame_b64}`,
+                videoFps: data.video_fps,
+            });
         } catch (error) {
-            console.error('Error:', error);
-            addLog(`Network error: ${error.message}`, 'error');
-            setTerminalStatus('Error', 'error');
+            addLog(`网络错误：${error.message}`, 'error');
             addFeedback('error', 'Failed to upload video');
+            setTerminalStatus('Error', 'error');
             stopAnalysis();
         }
     });
 
+    stopAnalysisBtn.addEventListener('click', () => {
+        addLog('用户手动停止分析。', 'warning');
+        addFeedback('info', '分析已停止');
+        setTerminalStatus('Stopped', 'idle');
+        stopAnalysis();
+    });
 
     function initTrampolineCalibrationController() {
-        if (!isTrampolineMode) return;
         if (!trampolineCalibrationUi || !calibrationGeometry) {
             addLog('Trampoline calibration UI failed to load.', 'error');
             return;
@@ -385,406 +436,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Poll for analysis results
-    let lastProgress = 0;
-
-    function startAnalysisPolling(videoId) {
-        currentVideoId = videoId;
-        // Setup canvas
-        analysisCanvas.width = videoPlayer.videoWidth || 640;
-        analysisCanvas.height = videoPlayer.videoHeight || 480;
-        analysisCanvas.hidden = false;
-
-        videoPlayer.currentTime = 0;
-        videoPlayer.play();
-
-        analysisInterval = setInterval(async () => {
-            if (!isAnalyzing) {
-                clearInterval(analysisInterval);
-                return;
-            }
-
-            try {
-                const response = await fetch(`/api/video/status/${videoId}`);
-                const data = await response.json();
-
-                if (data.status === 'processing') {
-                    progressFill.style.width = `${data.progress}%`;
-                    progressText.textContent = `Processing: ${Math.round(data.progress)}%`;
-
-                    const currentProgress = Math.floor(data.progress / 10) * 10;
-                    if (currentProgress > lastProgress && currentProgress > 0) {
-                        if (isTrampolineMode) {
-                            addLog(`Progress: ${currentProgress}% | Jumps: ${data.reps || 0} | Action: ${data.current_action || '--'}`, 'progress');
-                        } else {
-                            addLog(`Progress: ${currentProgress}% | Reps: ${data.reps || 0} | Score: ${data.form_score || '--'}`, 'progress');
-                        }
-                        lastProgress = currentProgress;
-                    }
-
-                    updateStats(data);
-
-                } else if (data.status === 'completed') {
-                    clearInterval(analysisInterval);
-                    analysisResults.endTime = new Date();
-                    analysisResults.completedJumps = data.completed_jumps || [];
-
-                    updateStats(data);
-
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '100%';
-
-                    addLog('Analysis completed successfully!', 'success');
-                    if (isTrampolineMode) {
-                        addLog(`Total Jumps: ${data.reps || 0}`, 'success');
-                        const jumps = data.completed_jumps || [];
-                        const actions = jumps.filter(j => !j.is_intermediate).map(j => j.action);
-                        if (actions.length > 0) {
-                            addLog(`Actions: ${actions.join(', ')}`, 'success');
-                        }
-                    } else {
-                        addLog(`Total Reps: ${data.reps || 0}`, 'success');
-                        addLog(`Average Score: ${data.avg_form_score || data.form_score || '--'}/100`, 'success');
-                        addLog(`Grade: ${data.grade || '--'}`, 'success');
-                    }
-                    setTerminalStatus('Completed', 'success');
-
-                    if (data.has_processed_video && data.processed_video_url) {
-                        addLog('Loading processed video with skeleton overlay...', 'processing');
-                        addFeedback('success', 'Analysis completed! Loading video with skeleton overlay...');
-
-                        videoPlayer.src = data.processed_video_url;
-                        videoPlayer.load();
-                        videoPlayer.play();
-
-                        addLog('Video with skeleton overlay loaded.', 'success');
-                    } else {
-                        addFeedback('success', 'Analysis completed!');
-                    }
-
-                    showReport(data);
-                    stopAnalysis();
-
-                } else if (data.status === 'error') {
-                    clearInterval(analysisInterval);
-                    addLog(`Analysis error: ${data.error}`, 'error');
-                    setTerminalStatus('Error', 'error');
-                    addFeedback('error', `Analysis error: ${data.error}`);
-                    stopAnalysis();
-                }
-            } catch (error) {
-                console.error('Polling error:', error);
-                addLog(`Network error during polling: ${error.message}`, 'warning');
-            }
-        }, 200);
-
-        // Also poll frame-by-frame for real-time display
-        requestAnimationFrame(function frameLoop() {
-            if (isAnalyzing && !videoPlayer.paused) {
-                sendFrameForAnalysis(videoId);
-                requestAnimationFrame(frameLoop);
-            }
-        });
-    }
-
-    async function sendFrameForAnalysis(videoId) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = videoPlayer.videoWidth;
-        tempCanvas.height = videoPlayer.videoHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(videoPlayer, 0, 0);
-
-        try {
-            const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/jpeg', 0.8));
-            const formData = new FormData();
-            formData.append('frame', blob);
-            formData.append('video_id', videoId);
-            formData.append('timestamp', videoPlayer.currentTime);
-
-            const response = await fetch('/api/video/analyze_frame', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-            if (data.success) {
-                drawPoseOnCanvas(data);
-                updateStats(data);
-
-                if (data.feedback && data.feedback !== lastFeedback) {
-                    addFeedback('warning', data.feedback);
-                    lastFeedback = data.feedback;
-                }
-            }
-        } catch (error) {
-            // Silently fail for frame analysis
-        }
-    }
-
-    let lastFeedback = '';
-
-    function drawPoseOnCanvas(data) {
-        ctx.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
-
-        if (!data.landmarks) return;
-
-        const connections = [
-            [11, 13], [13, 15], // Left arm
-            [12, 14], [14, 16], // Right arm
-            [11, 12], // Shoulders
-            [11, 23], [12, 24], // Torso
-            [23, 24], // Hips
-            [23, 25], [25, 27], // Left leg
-            [24, 26], [26, 28]  // Right leg
-        ];
-
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 3;
-
-        connections.forEach(([i, j]) => {
-            if (data.landmarks[i] && data.landmarks[j]) {
-                ctx.beginPath();
-                ctx.moveTo(data.landmarks[i].x * analysisCanvas.width, data.landmarks[i].y * analysisCanvas.height);
-                ctx.lineTo(data.landmarks[j].x * analysisCanvas.width, data.landmarks[j].y * analysisCanvas.height);
-                ctx.stroke();
-            }
-        });
-
-        ctx.fillStyle = '#ff0000';
-        Object.values(data.landmarks).forEach(point => {
-            if (point) {
-                ctx.beginPath();
-                ctx.arc(point.x * analysisCanvas.width, point.y * analysisCanvas.height, 5, 0, 2 * Math.PI);
-                ctx.fill();
-            }
-        });
-    }
-
-    function updateStats(data) {
-        if (data.reps !== undefined) {
-            statReps.textContent = data.reps;
-            analysisResults.reps = data.reps;
-        }
-
-        if (data.form_score !== undefined) {
-            const score = Math.round(data.form_score);
-            statScore.textContent = score;
-            gaugeValue.textContent = score;
-            analysisResults.scores.push(score);
-
-            const offset = 251.2 - (251.2 * score / 100);
-            gaugeFill.style.strokeDashoffset = offset;
-
-            let color = '#27ae60';
-            if (score < 60) color = '#e74c3c';
-            else if (score < 70) color = '#e67e22';
-            else if (score < 80) color = '#f1c40f';
-            else if (score < 90) color = '#3498db';
-            gaugeFill.style.stroke = color;
-        }
-
-        if (data.grade !== undefined) {
-            statGrade.textContent = data.grade;
-            statGrade.className = `stat-value grade grade-${data.grade.toLowerCase()}`;
-        }
-
-        if (data.state !== undefined) {
-            statState.textContent = data.state;
-        }
-
-        // Trampoline-specific: update action card
-        if (isTrampolineMode && data.current_action !== undefined) {
-            statAction.textContent = data.current_action;
-            statAction.className = `stat-value action-name action-${data.current_action.toLowerCase()}`;
-        }
-    }
-
-    function resetStats() {
-        statReps.textContent = '0';
-        statScore.textContent = '--';
-        statGrade.textContent = '--';
-        statState.textContent = '--';
-        gaugeValue.textContent = '--';
-        gaugeFill.style.strokeDashoffset = 251.2;
-        progressFill.style.width = '0%';
-        progressText.textContent = '0%';
-        if (statAction) statAction.textContent = '--';
-    }
-
-    // Stop Analysis
-    stopAnalysisBtn.addEventListener('click', () => {
-        addLog('Analysis stopped by user.', 'warning');
-        setTerminalStatus('Stopped', 'idle');
-        stopAnalysis();
-        addFeedback('info', 'Analysis stopped by user');
-    });
-
-    function stopAnalysis() {
-        isAnalyzing = false;
-        lastProgress = 0;
-        if (analysisInterval) {
-            clearInterval(analysisInterval);
-            analysisInterval = null;
-        }
-
-        videoPlayer.pause();
-        analyzeBtn.disabled = false;
-        stopAnalysisBtn.disabled = true;
-        if (!isTrampolineMode) exerciseSelect.disabled = false;
-    }
-
-    // Add feedback to log
-    function addFeedback(type, message) {
-        const now = new Date();
-        const timeStr = `${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-
-        const item = document.createElement('div');
-        item.className = `feedback-item ${type}`;
-        item.innerHTML = `<span class="feedback-time">${timeStr}</span><span class="feedback-text">${message}</span>`;
-
-        feedbackLog.insertBefore(item, feedbackLog.firstChild);
-
-        while (feedbackLog.children.length > 50) {
-            feedbackLog.removeChild(feedbackLog.lastChild);
-        }
-
-        analysisResults.feedbacks.push({ time: timeStr, type, message });
-    }
-
-    initTrampolineCalibrationController();
-
-    // Show final report
-    function showReport(data) {
-        if (isTrampolineMode) {
-            showTrampolineReport(data);
-            return;
-        }
-
-        const avgScore = analysisResults.scores.length > 0
-            ? Math.round(analysisResults.scores.reduce((a, b) => a + b, 0) / analysisResults.scores.length)
-            : 0;
-
-        const duration = analysisResults.endTime && analysisResults.startTime
-            ? Math.round((analysisResults.endTime - analysisResults.startTime) / 1000)
-            : 0;
-
-        const grade = avgScore >= 90 ? 'A' : avgScore >= 80 ? 'B' : avgScore >= 70 ? 'C' : avgScore >= 60 ? 'D' : 'F';
-
-        reportContent.innerHTML = `
-            <div class="report-row">
-                <span class="report-label">Exercise</span>
-                <span class="report-value">${exerciseSelect.options[exerciseSelect.selectedIndex].text}</span>
-            </div>
-            <div class="report-row">
-                <span class="report-label">Total Reps</span>
-                <span class="report-value">${analysisResults.reps}</span>
-            </div>
-            <div class="report-row">
-                <span class="report-label">Average Form Score</span>
-                <span class="report-value">${avgScore}/100</span>
-            </div>
-            <div class="report-row">
-                <span class="report-label">Final Grade</span>
-                <span class="report-value">${grade}</span>
-            </div>
-            <div class="report-row">
-                <span class="report-label">Duration</span>
-                <span class="report-value">${duration}s</span>
-            </div>
-            <div class="report-row">
-                <span class="report-label">Form Warnings</span>
-                <span class="report-value">${analysisResults.feedbacks.filter(f => f.type === 'warning').length}</span>
-            </div>
-        `;
-
-        reportSection.classList.remove('hidden');
-    }
-
-    function showTrampolineReport(data) {
-        const jumps = data.completed_jumps || analysisResults.completedJumps || [];
-        const jumpCount = data.reps || jumps.length;
-
-        const duration = analysisResults.endTime && analysisResults.startTime
-            ? Math.round((analysisResults.endTime - analysisResults.startTime) / 1000)
-            : 0;
-
-        // Action breakdown
-        const actionCounts = {};
-        const realJumps = jumps.filter(j => !j.is_intermediate);
-        realJumps.forEach(j => {
-            actionCounts[j.action] = (actionCounts[j.action] || 0) + 1;
-        });
-
-        const actionBreakdown = Object.entries(actionCounts)
-            .map(([k, v]) => `${k}: ${v}`).join(', ') || '--';
-
-        function fmtNum(value, digits = 2) {
-            const n = Number(value);
-            return Number.isFinite(n) ? n.toFixed(digits) : String(value ?? '?');
-        }
-
-        // Per-jump details
-        let jumpDetails = '';
-        realJumps.forEach((jump, i) => {
-            const landing = jump.landing;
-            let landingText = '落点: --';
-            if (landing) {
-                const xy = landing.bed_xy_m || ['?', '?'];
-                const conf = landing.confidence !== undefined ? Number(landing.confidence).toFixed(2) : '--';
-                const low = landing.confidence !== undefined && Number(landing.confidence) < 0.5;
-                landingText = `落点: (${fmtNum(xy[0])}, ${fmtNum(xy[1])})m / ${landing.zone || '--'} / conf ${conf}${low ? ' <span class="landing-low-confidence">低置信</span>' : ''}`;
-            }
-            jumpDetails += `
-                <div class="report-row">
-                    <span class="report-label">Jump ${jump.jump_number || (i + 1)}</span>
-                    <span class="report-value">${jump.action} <span class="jump-flight-info">(${jump.flight_frames}f)</span><br><small>${landingText}</small></span>
-                </div>`;
-        });
-
-        const intermediateCount = jumps.filter(j => j.is_intermediate).length;
-
-        reportContent.innerHTML = `
-            <div class="report-row">
-                <span class="report-label">Analysis Type</span>
-                <span class="report-value">Trampoline</span>
-            </div>
-            <div class="report-row">
-                <span class="report-label">Total Jumps</span>
-                <span class="report-value">${jumpCount}</span>
-            </div>
-            ${intermediateCount > 0 ? `
-            <div class="report-row">
-                <span class="report-label">Intermediate Bounces</span>
-                <span class="report-value">${intermediateCount}</span>
-            </div>` : ''}
-            <div class="report-row">
-                <span class="report-label">Action Breakdown</span>
-                <span class="report-value">${actionBreakdown}</span>
-            </div>
-            ${jumpDetails}
-            <div class="report-row">
-                <span class="report-label">Processing Duration</span>
-                <span class="report-value">${duration}s</span>
-            </div>
-        `;
-
-        reportSection.classList.remove('hidden');
-
-        // Enable LLM analysis button
-        if (llmSection) llmSection.classList.remove('hidden');
-        if (llmBtn) llmBtn.disabled = false;
-    }
-
-    // ==================== LLM Analysis ====================
-
-    function simpleMd(text) {
-        // Minimal markdown: **bold**, \n→<br>, ## heading
-        return text
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/^## (.+)$/gm, '<div style="font-weight:700;color:#00d4aa;margin:8px 0 4px">$1</div>')
-            .replace(/\n/g, '<br>');
-    }
-
     if (llmBtn) {
         llmBtn.addEventListener('click', () => {
             if (!currentVideoId) return;
@@ -794,7 +445,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 llmEventSource = null;
             }
 
-            // Show streaming state
             llmStreaming.classList.remove('hidden');
             llmStreaming.classList.remove('collapsed');
             llmStreamingText.innerHTML = '';
@@ -802,33 +452,23 @@ document.addEventListener('DOMContentLoaded', function() {
             llmCards.classList.remove('visible');
             llmToggleRaw.classList.add('hidden');
 
-            let llmStreamFinished = false;
+            let finished = false;
             llmEventSource = new EventSource(`/api/video/llm_analysis/${currentVideoId}`);
-
             llmEventSource.onmessage = function(e) {
                 let data;
                 try { data = JSON.parse(e.data); } catch { return; }
-
                 if (data.type === 'chunk') {
                     llmStreamingText.innerHTML += simpleMd(data.text);
                     llmStreamingText.scrollTop = llmStreamingText.scrollHeight;
-                }
-                else if (data.type === 'fast_done') {
-                    // Fast model finished; waiting for quality model
+                } else if (data.type === 'fast_done') {
                     const header = llmStreaming.querySelector('.llm-streaming-header');
                     if (header) {
-                        header.innerHTML = `
-                            <span class="llm-status-dot llm-quality-waiting"></span>
-                            <span>正在生成高质量分析...</span>
-                        `;
+                        header.innerHTML = '<span class="llm-status-dot llm-quality-waiting"></span><span>正在生成高质量分析...</span>';
                     }
-                }
-                else if (data.type === 'done') {
-                    llmStreamFinished = true;
+                } else if (data.type === 'done') {
+                    finished = true;
                     llmEventSource.close();
                     llmEventSource = null;
-
-                    // Populate cards
                     const sectionMap = {
                         '整体表现': 'llm-card-overview',
                         '主要问题': 'llm-card-issues',
@@ -837,34 +477,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     };
                     for (const [heading, cardId] of Object.entries(sectionMap)) {
                         const card = document.getElementById(cardId);
-                        if (card) {
-                            const body = card.querySelector('.llm-card-body');
-                            const content = (data.sections && data.sections[heading]) || '';
-                            body.innerHTML = content ? simpleMd(content) : '<span style="color:#999">AI 未能生成此部分分析</span>';
-                        }
+                        if (!card) continue;
+                        const body = card.querySelector('.llm-card-body');
+                        const content = (data.sections && data.sections[heading]) || '';
+                        body.innerHTML = content ? simpleMd(content) : '<span style="color:#999">AI 未生成此部分</span>';
                     }
-
-                    // Collapse streaming, show cards
                     llmStreaming.classList.add('collapsed');
                     llmCards.classList.remove('hidden');
-                    // Trigger reflow for animation
                     requestAnimationFrame(() => llmCards.classList.add('visible'));
                     llmToggleRaw.classList.remove('hidden');
                     llmBtn.disabled = false;
-                }
-                else if (data.type === 'error') {
-                    llmStreamFinished = true;
+                } else if (data.type === 'error') {
+                    finished = true;
                     llmEventSource.close();
                     llmEventSource = null;
                     llmStreamingText.innerHTML += `<br><span style="color:#e74c3c">${data.message}</span>`;
                     llmBtn.disabled = false;
                 }
             };
-
             llmEventSource.onerror = function() {
-                if (llmStreamFinished) {
-                    return;
-                }
+                if (finished) return;
                 llmEventSource.close();
                 llmEventSource = null;
                 llmStreamingText.innerHTML += '<br><span style="color:#e74c3c">连接中断</span>';
@@ -873,76 +505,58 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Toggle raw text
     if (llmToggleRaw) {
         llmToggleRaw.addEventListener('click', () => {
-            const isCollapsed = llmStreaming.classList.contains('collapsed');
-            if (isCollapsed) {
-                llmStreaming.classList.remove('collapsed');
-                llmToggleRaw.textContent = '折叠原文';
-            } else {
-                llmStreaming.classList.add('collapsed');
-                llmToggleRaw.textContent = '展开原文';
-            }
+            const collapsed = llmStreaming.classList.contains('collapsed');
+            llmStreaming.classList.toggle('collapsed', !collapsed);
+            llmToggleRaw.textContent = collapsed ? '折叠原文' : '展开原文';
         });
     }
 
-    // ==================== Download Report ====================
     downloadReportBtn.addEventListener('click', () => {
-        let reportText;
+        const jumps = analysisResults.completedJumps || [];
+        const realJumps = jumps.filter(j => !j.is_intermediate);
+        const reportText = `
+蹦床视频分析报告
+==============================
+时间：${new Date().toLocaleString()}
+视频：${videoFile ? videoFile.name : 'Unknown'}
 
-        if (isTrampolineMode) {
-            const jumps = analysisResults.completedJumps || [];
-            const realJumps = jumps.filter(j => !j.is_intermediate);
-            reportText = `
-TRAMPOLINE ANALYSIS REPORT
-========================================
-Date: ${new Date().toLocaleString()}
-Video: ${videoFile ? videoFile.name : 'Unknown'}
+结果摘要
+------------------------------
+总跳次：${analysisResults.reps}
+过渡跳：${jumps.filter(j => j.is_intermediate).length}
 
-RESULTS
--------
-Total Jumps: ${analysisResults.reps}
-Intermediate Bounces: ${jumps.filter(j => j.is_intermediate).length}
+逐跳明细
+------------------------------
+${realJumps.map((j, i) => {
+            const landing = j.landing;
+            const landingText = landing
+                ? ` | 落点=(${(landing.bed_xy_m || [])[0]}, ${(landing.bed_xy_m || [])[1]})m ${landing.zone || ''} conf=${landing.confidence}`
+                : '';
+            return `第 ${j.jump_number || (i + 1)} 跳：${j.action}（腾空 ${j.flight_frames} 帧）${landingText}`;
+        }).join('\n')}
 
-JUMP DETAILS
-------------
-${realJumps.map((j, i) => { const l = j.landing; const landing = l ? ` | landing: (${(l.bed_xy_m || [])[0]}, ${(l.bed_xy_m || [])[1]})m ${l.zone || ''} conf=${l.confidence}` : ''; return `Jump ${j.jump_number || (i + 1)}: ${j.action} (flight: ${j.flight_frames} frames)${landing}`; }).join('\n')}
-
-FEEDBACK LOG
-------------
+反馈日志
+------------------------------
 ${analysisResults.feedbacks.map(f => `[${f.time}] ${f.type.toUpperCase()}: ${f.message}`).join('\n')}
-            `;
-        } else {
-            reportText = `
-FITNESS TRAINER - VIDEO ANALYSIS REPORT
-========================================
-Date: ${new Date().toLocaleString()}
-Video: ${videoFile ? videoFile.name : 'Unknown'}
-Exercise: ${exerciseSelect.options[exerciseSelect.selectedIndex].text}
-
-RESULTS
--------
-Total Repetitions: ${analysisResults.reps}
-Average Form Score: ${analysisResults.scores.length > 0 ? Math.round(analysisResults.scores.reduce((a, b) => a + b, 0) / analysisResults.scores.length) : 0}/100
-
-FEEDBACK LOG
-------------
-${analysisResults.feedbacks.map(f => `[${f.time}] ${f.type.toUpperCase()}: ${f.message}`).join('\n')}
-            `;
-        }
-
+        `;
         const blob = new Blob([reportText], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${isTrampolineMode ? 'trampoline' : 'fitness'}_report_${Date.now()}.txt`;
+        a.download = `trampoline_report_${Date.now()}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     });
 
-    // Initialize
-    if (!isTrampolineMode) {
-        // Already called above via loadExercises()
+    if (terminalToggle) {
+        terminalToggle.addEventListener('click', function() {
+            terminalBody.classList.toggle('collapsed');
+            terminalToggle.classList.toggle('collapsed');
+        });
     }
+
+    addLog('系统已初始化，等待上传蹦床视频。', 'info');
+    initTrampolineCalibrationController();
 });

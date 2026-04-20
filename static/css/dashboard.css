@@ -88,39 +88,17 @@
     text-align: center;
 }
 
-.recent-workouts {
+.project-notes {
     background-color: white;
     border-radius: 10px;
     padding: 20px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
 }
 
-.recent-workouts h2 {
+.project-notes h2 {
     font-size: 1.5rem;
     color: #3a3a3a;
     margin-bottom: 15px;
-}
-
-.workout-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.workout-table th,
-.workout-table td {
-    padding: 12px 15px;
-    text-align: left;
-    border-bottom: 1px solid #eee;
-}
-
-.workout-table th {
-    background-color: #f9f9f9;
-    color: #555;
-    font-weight: 500;
-}
-
-.workout-table tr:hover {
-    background-color: #f5f5f5;
 }
 
 @media (max-width: 768px) {
@@ -130,9 +108,5 @@
     
     .charts-container {
         flex-direction: column;
-    }
-    
-    .workout-table {
-        font-size: 0.9rem;
     }
 }

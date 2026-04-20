@@ -1,7 +1,9 @@
 """
-Standalone video processor - Runs in separate process to avoid memory issues
-Creates output video WITH SKELETON OVERLAY
-Usage: python video_processor.py <video_path> <exercise_type> <output_json_path> [output_video_path]
+Standalone trampoline video processor.
+
+Runs in a separate process to avoid memory issues while producing:
+- JSON analysis results for polling
+- processed video with trampoline overlays
 """
 
 import os
@@ -11,225 +13,73 @@ os.environ["TF_NUM_INTEROP_THREADS"] = "1"
 os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
-import sys
-import json
-import cv2
 import gc
+import json
+import sys
 
-# Try to use imageio with ffmpeg for H.264 support
+import cv2
+
 try:
     import imageio
     IMAGEIO_AVAILABLE = True
-    print("imageio available for H.264 output")
+    print('imageio available for H.264 output')
 except ImportError:
     IMAGEIO_AVAILABLE = False
-    print("imageio not available, using OpenCV for output")
+    print('imageio not available, using OpenCV for output')
 
 
-def draw_skeleton(frame, landmarks, mp_pose, mp_drawing):
-    """Draw enhanced skeleton on frame with neon glow effect"""
+def draw_skeleton(frame, landmarks):
+    """Draw a simplified skeleton with highlighted joints."""
     h, w = frame.shape[:2]
-    
-    # Define custom connections for cleaner skeleton
-    # Body connections with different colors
-    BODY_CONNECTIONS = [
-        # Torso (cyan)
-        (11, 12),  # Shoulders
-        (11, 23),  # Left shoulder to hip
-        (12, 24),  # Right shoulder to hip
-        (23, 24),  # Hips
-    ]
-    
-    ARM_CONNECTIONS = [
-        # Left arm (green)
-        (11, 13), (13, 15),  # Left arm
-        # Right arm (green)  
-        (12, 14), (14, 16),  # Right arm
-    ]
-    
-    LEG_CONNECTIONS = [
-        # Left leg (blue)
-        (23, 25), (25, 27),  # Left leg
-        # Right leg (blue)
-        (24, 26), (26, 28),  # Right leg
-    ]
-    
-    # Get landmark positions
+
+    body_connections = [(11, 12), (11, 23), (12, 24), (23, 24)]
+    arm_connections = [(11, 13), (13, 15), (12, 14), (14, 16)]
+    leg_connections = [(23, 25), (25, 27), (24, 26), (26, 28)]
+
     def get_pos(idx):
         lm = landmarks.landmark[idx]
         return (int(lm.x * w), int(lm.y * h))
-    
+
     def is_visible(idx):
         return landmarks.landmark[idx].visibility > 0.5
-    
-    # Draw connections with glow effect
+
     def draw_line_with_glow(p1, p2, color, thickness=3):
-        # Outer glow
-        cv2.line(frame, p1, p2, (color[0]//3, color[1]//3, color[2]//3), thickness + 4)
-        # Main line
+        cv2.line(frame, p1, p2, (color[0] // 3, color[1] // 3, color[2] // 3), thickness + 4)
         cv2.line(frame, p1, p2, color, thickness)
-        # Inner bright line
-        cv2.line(frame, p1, p2, (min(255, color[0]+50), min(255, color[1]+50), min(255, color[2]+50)), max(1, thickness-1))
-    
-    # Draw body (cyan)
-    for start, end in BODY_CONNECTIONS:
+        cv2.line(
+            frame,
+            p1,
+            p2,
+            (min(255, color[0] + 50), min(255, color[1] + 50), min(255, color[2] + 50)),
+            max(1, thickness - 1),
+        )
+
+    for start, end in body_connections:
         if is_visible(start) and is_visible(end):
-            draw_line_with_glow(get_pos(start), get_pos(end), (255, 200, 0), 3)  # Cyan in BGR
-    
-    # Draw arms (green)
-    for start, end in ARM_CONNECTIONS:
+            draw_line_with_glow(get_pos(start), get_pos(end), (255, 200, 0), 3)
+    for start, end in arm_connections:
         if is_visible(start) and is_visible(end):
             draw_line_with_glow(get_pos(start), get_pos(end), (0, 255, 100), 3)
-    
-    # Draw legs (blue-purple)
-    for start, end in LEG_CONNECTIONS:
+    for start, end in leg_connections:
         if is_visible(start) and is_visible(end):
             draw_line_with_glow(get_pos(start), get_pos(end), (255, 100, 100), 3)
-    
-    # Draw key joints with glow
-    key_joints = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
-    for idx in key_joints:
+
+    for idx in [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]:
         if is_visible(idx):
             pos = get_pos(idx)
-            # Outer glow
             cv2.circle(frame, pos, 8, (50, 50, 50), -1)
-            # Middle ring
             cv2.circle(frame, pos, 6, (0, 200, 100), -1)
-            # Inner dot
             cv2.circle(frame, pos, 3, (255, 255, 255), -1)
-    
-    return frame
 
-
-def draw_stats_overlay(frame, stats):
-    """Draw professional exercise stats overlay on frame"""
-    h, w = frame.shape[:2]
-    
-    # Calculate overlay dimensions
-    box_width = 320
-    box_height = 180
-    margin = 15
-    padding = 12
-    
-    # Create semi-transparent overlay with rounded corners effect
-    overlay = frame.copy()
-    
-    # Main background box
-    cv2.rectangle(overlay, (margin, margin), (margin + box_width, margin + box_height), 
-                  (30, 30, 30), -1)
-    
-    # Add accent line on left
-    cv2.rectangle(overlay, (margin, margin), (margin + 5, margin + box_height), 
-                  (0, 200, 100), -1)
-    
-    cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
-    
-    # Fonts
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_bold = cv2.FONT_HERSHEY_DUPLEX
-    
-    # Calculate positions
-    x_start = margin + padding + 8
-    y_start = margin + 35
-    line_height = 38
-    
-    # === REPS (Large, prominent) ===
-    reps_text = f"{stats['reps']}"
-    cv2.putText(frame, "REPS", (x_start, y_start - 8), 
-                font, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
-    cv2.putText(frame, reps_text, (x_start, y_start + 28), 
-                font_bold, 1.4, (255, 255, 255), 2, cv2.LINE_AA)
-    
-    # === SCORE with color gradient based on value ===
-    score = stats.get('form_score', 100)
-    grade = stats.get('grade', 'A')
-    
-    # Color based on score
-    if score >= 90:
-        score_color = (0, 230, 118)  # Bright green
-    elif score >= 75:
-        score_color = (0, 200, 255)  # Gold/Yellow
-    elif score >= 60:
-        score_color = (0, 165, 255)  # Orange
-    else:
-        score_color = (60, 76, 231)  # Red
-    
-    # Score display (middle section)
-    score_x = x_start + 90
-    cv2.putText(frame, "SCORE", (score_x, y_start - 8), 
-                font, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"{int(score)}", (score_x, y_start + 28), 
-                font_bold, 1.4, score_color, 2, cv2.LINE_AA)
-    
-    # === GRADE (with badge style) ===
-    grade_x = score_x + 90
-    cv2.putText(frame, "GRADE", (grade_x, y_start - 8), 
-                font, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
-    
-    # Grade badge background
-    badge_x = grade_x
-    badge_y = y_start + 5
-    badge_size = 35
-    cv2.rectangle(frame, (badge_x - 5, badge_y - 5), (badge_x + badge_size, badge_y + badge_size - 5), 
-                  score_color, -1)
-    cv2.putText(frame, grade, (badge_x + 5, badge_y + 22), 
-                font_bold, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
-    
-    # === STATE (with icon-like indicator) ===
-    state = stats.get('state', 'READY')
-    if state is None or state == 'None':
-        state = 'READY'
-    
-    # Map states to user-friendly names and colors
-    state_info = {
-        'up': ('UP', (0, 230, 118)),
-        'down': ('DOWN', (255, 180, 0)),
-        'UP': ('UP', (0, 230, 118)),
-        'DOWN': ('DOWN', (255, 180, 0)),
-        'hold': ('HOLD', (0, 200, 255)),
-        'HOLD': ('HOLD', (0, 200, 255)),
-        'READY': ('READY', (100, 100, 100)),
-        'ready': ('READY', (100, 100, 100)),
-        'UNKNOWN': ('READY', (100, 100, 100)),
-    }
-    
-    state_display, state_color = state_info.get(state, (state.upper(), (180, 180, 180)))
-    
-    state_y = y_start + line_height + 25
-    cv2.putText(frame, "STATE", (x_start, state_y), 
-                font, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
-    
-    # State indicator dot
-    dot_y = state_y + 20
-    cv2.circle(frame, (x_start + 8, dot_y), 6, state_color, -1)
-    cv2.putText(frame, state_display, (x_start + 22, dot_y + 5), 
-                font, 0.65, state_color, 2, cv2.LINE_AA)
-    
-    # === FEEDBACK (if any) ===
-    feedback = stats.get('feedback', '')
-    if feedback and feedback.strip():
-        feedback_y = state_y + line_height + 15
-        # Truncate long feedback
-        if len(feedback) > 40:
-            feedback = feedback[:37] + "..."
-        cv2.putText(frame, feedback, (x_start, feedback_y), 
-                    font, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
-    
     return frame
 
 
 def process_video(video_path: str, exercise_type: str, output_json_path: str, output_video_path: str = None):
-    """Process video, draw skeleton, and write results"""
+    """Process a trampoline video, draw overlay, and write incremental results."""
     import mediapipe as mp
-
-    is_trampoline = (exercise_type == "trampoline")
-
-    if is_trampoline:
-        from trampoline.analyzer import TrampolineAnalyzer
-        from trampoline.overlay import draw_trampoline_overlay, draw_angle_arcs
-        from trampoline.bed_tracker import BedTracker, load_corners_sidecar
-    else:
-        from exercises.engine import ExerciseEngine
+    from trampoline.analyzer import TrampolineAnalyzer
+    from trampoline.bed_tracker import BedTracker, load_corners_sidecar
+    from trampoline.overlay import draw_angle_arcs, draw_trampoline_overlay
 
     results = {
         'status': 'processing',
@@ -237,162 +87,129 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         'reps': 0,
         'form_score': 100,
         'avg_form_score': 100,
-        'grade': 'A',
+        'grade': '--',
         'state': 'READY',
         'feedback': '',
         'error': None,
         'output_video': output_video_path,
-        'mode': 'trampoline' if is_trampoline else 'fitness',
+        'mode': 'trampoline',
         'current_action': '--',
         'completed_jumps': [],
     }
-    
+
     def save_results():
-        with open(output_json_path, 'w') as f:
+        with open(output_json_path, 'w', encoding='utf-8') as f:
             json.dump(results, f)
-    
+
+    if exercise_type != 'trampoline':
+        results['status'] = 'error'
+        results['error'] = 'Only trampoline analysis is supported'
+        save_results()
+        print(results['error'])
+        return
+
     cap = None
     out = None
     pose = None
     imageio_writer = None
-    
+
     try:
-        # Open video
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             results['status'] = 'error'
             results['error'] = 'Could not open video file'
             save_results()
             return
-        
-        # Get video properties
+
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        print(f"Video: {width}x{height} @ {fps:.1f} fps, {total_frames} frames")
-        
-        # Create output video writer if path provided
-        out = None
-        
+        print(f'Video: {width}x{height} @ {fps:.1f} fps, {total_frames} frames')
+
         if output_video_path:
-            # Ensure .mp4 extension
             if not output_video_path.endswith('.mp4'):
                 output_video_path = output_video_path.rsplit('.', 1)[0] + '.mp4'
-            
+
             if IMAGEIO_AVAILABLE:
-                # Use imageio with ffmpeg for H.264
                 try:
                     imageio_writer = imageio.get_writer(
                         output_video_path,
                         fps=fps,
-                        codec='libx264',  # H.264 codec
-                        pixelformat='yuv420p',  # Browser compatible
+                        codec='libx264',
+                        pixelformat='yuv420p',
                         quality=8,
-                        macro_block_size=1  # Avoid size issues
+                        macro_block_size=1,
                     )
-                    print(f"Using imageio/FFmpeg H.264 writer: {output_video_path}")
-                except Exception as e:
-                    print(f"imageio writer init failed: {e}, will use OpenCV")
+                    print(f'Using imageio/FFmpeg H.264 writer: {output_video_path}')
+                except Exception as exc:
+                    print(f'imageio writer init failed: {exc}, will use OpenCV')
                     imageio_writer = None
-            
+
             if not imageio_writer:
-                # Fallback to OpenCV
-                codecs_to_try = [
-                    ('avc1', '.mp4'),  # H.264 - best for web
-                    ('H264', '.mp4'),  # Alternative H.264
-                    ('XVID', '.avi'),  # Fallback
-                    ('mp4v', '.mp4'),  # Last resort
-                ]
-                
+                codecs_to_try = [('avc1', '.mp4'), ('H264', '.mp4'), ('XVID', '.avi'), ('mp4v', '.mp4')]
                 for codec, ext in codecs_to_try:
                     try:
                         fourcc = cv2.VideoWriter_fourcc(*codec)
-                        if not output_video_path.endswith(ext):
-                            output_video_path = output_video_path.rsplit('.', 1)[0] + ext
-                        out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+                        candidate_path = output_video_path.rsplit('.', 1)[0] + ext
+                        out = cv2.VideoWriter(candidate_path, fourcc, fps, (width, height))
                         if out.isOpened():
-                            print(f"Using OpenCV codec: {codec}")
+                            output_video_path = candidate_path
+                            print(f'Using OpenCV codec: {codec}')
                             break
                         out.release()
                         out = None
-                    except:
+                    except Exception:
                         continue
-                
-                if not out or not out.isOpened():
+                if not out:
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
-                    print("Using fallback codec: mp4v")
-            
-            # Update results with actual output path
+                    print('Using fallback codec: mp4v')
+
             results['output_video'] = output_video_path
-            print(f"Output video: {output_video_path}")
-        
-        # Initialize MediaPipe
+            print(f'Output video: {output_video_path}')
+
         mp_pose = mp.solutions.pose
-        mp_drawing = mp.solutions.drawing_utils
-        
         pose = mp_pose.Pose(
-            static_image_mode=False,  # Video mode for better tracking
-            model_complexity=1,  # Better accuracy
+            static_image_mode=False,
+            model_complexity=1,
             enable_segmentation=False,
             min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=0.5,
         )
-        print("MediaPipe Pose initialized")
-        
-        # Initialize analysis engine
-        if is_trampoline:
-            bed_tracker = None
-            video_id = os.path.basename(output_json_path).replace('_results.json', '')
-            corners_json = os.path.join(os.path.dirname(output_json_path), f"{video_id}_corners.json")
-            if os.path.exists(corners_json):
-                try:
-                    sidecar = load_corners_sidecar(corners_json, expected_video_id=video_id)
-                    bed_tracker = BedTracker.from_sidecar(sidecar)
-                    cap_peek = cv2.VideoCapture(video_path)
-                    ok_first, first_frame = cap_peek.read()
-                    cap_peek.release()
-                    if ok_first:
-                        bed_tracker.initialize(first_frame, frame_index=0)
-                        print(f"Bed tracker initialized from {corners_json}")
-                    else:
-                        results['status'] = 'error'
-                        results['error'] = 'Could not read first frame for bed tracker initialization'
-                        save_results()
-                        print(f"Error: {results['error']}")
-                        return
-                except Exception as e:
-                    results['status'] = 'error'
-                    results['error'] = f"Invalid trampoline corners sidecar: {e}"
-                    save_results()
-                    print(f"Error: {results['error']}")
-                    return
-            else:
-                print(f"No trampoline corners sidecar found at {corners_json}; landing payload disabled")
+        print('MediaPipe Pose initialized')
 
-            analyzer = TrampolineAnalyzer(fps=fps, bed_tracker=bed_tracker)
-            print(f"Trampoline analyzer initialized (fps={fps:.1f}, bed_tracker={'on' if bed_tracker else 'off'})")
-        else:
-            engine = ExerciseEngine()
-            if not engine.set_exercise(exercise_type):
-                print(f"WARNING: Failed to load exercise: {exercise_type}")
-            else:
-                print(f"Exercise loaded: {exercise_type}")
+        video_id = os.path.basename(output_json_path).replace('_results.json', '')
+        corners_json = os.path.join(os.path.dirname(output_json_path), f'{video_id}_corners.json')
+        if not os.path.exists(corners_json):
+            results['status'] = 'error'
+            results['error'] = f'No trampoline corners sidecar found at {corners_json}'
+            save_results()
+            print(results['error'])
+            return
 
-        frame_count = 0
-        if is_trampoline:
-            analyze_skip = max(1, int(fps / 15))  # ~15 fps for jump detection
-        else:
-            analyze_skip = max(1, int(fps / 8))  # ~8 fps for exercises
-        print(f"Analyze skip: {analyze_skip} (analyzing at ~{fps/analyze_skip:.1f} fps)")
-        
-        # Current stats for overlay
+        sidecar = load_corners_sidecar(corners_json, expected_video_id=video_id)
+        bed_tracker = BedTracker.from_sidecar(sidecar)
+        cap_peek = cv2.VideoCapture(video_path)
+        ok_first, first_frame = cap_peek.read()
+        cap_peek.release()
+        if not ok_first:
+            results['status'] = 'error'
+            results['error'] = 'Could not read first frame for bed tracker initialization'
+            save_results()
+            print(results['error'])
+            return
+        bed_tracker.initialize(first_frame, frame_index=0)
+        print(f'Bed tracker initialized from {corners_json}')
+
+        analyzer = TrampolineAnalyzer(fps=fps, bed_tracker=bed_tracker)
+        analyze_skip = max(1, int(fps / 15))
+        print(f'Analyze skip: {analyze_skip} (analyzing at ~{fps / analyze_skip:.1f} fps)')
+
         current_stats = {
             'reps': 0,
             'form_score': 100,
-            'grade': 'A',
+            'grade': '--',
             'state': 'READY',
             'feedback': '',
             'jump_count': 0,
@@ -406,213 +223,160 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
             'landings': [],
         }
 
+        frame_count = 0
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
             frame_count += 1
-            results['progress'] = int((frame_count / total_frames) * 100)
+            results['progress'] = int((frame_count / max(total_frames, 1)) * 100)
 
-            # Bed tracking must run for every decoded frame, independent of sampled analyzer cadence.
-            if is_trampoline and getattr(analyzer, 'bed_tracker', None) is not None:
+            if analyzer.bed_tracker is not None:
                 try:
                     current_stats['bed_info'] = analyzer.bed_tracker.update(frame, frame_index=frame_count)
-                except Exception as e:
-                    current_stats['bed_info'] = {'success': False, 'message': str(e)}
+                except Exception as exc:
+                    current_stats['bed_info'] = {'success': False, 'message': str(exc)}
 
-            # Process with MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pose_results = pose.process(rgb_frame)
 
             if pose_results.pose_landmarks:
-                # Draw skeleton on frame
-                frame = draw_skeleton(frame, pose_results.pose_landmarks, mp_pose, mp_drawing)
+                frame = draw_skeleton(frame, pose_results.pose_landmarks)
+                draw_angle_arcs(frame, pose_results.pose_landmarks)
 
-                # Draw angle arcs on skeleton (trampoline mode)
-                if is_trampoline:
-                    draw_angle_arcs(frame, pose_results.pose_landmarks)
-
-                # Analyze periodically
                 if frame_count % analyze_skip == 0:
-                    if is_trampoline:
-                        tramp_result = analyzer.process_frame(frame, pose_results.pose_landmarks.landmark, frame_count)
-                        current_stats['reps'] = tramp_result['jump_count']
-                        current_stats['jump_count'] = tramp_result['jump_count']
-                        current_stats['current_action'] = tramp_result['current_action']
-                        current_stats['phase'] = tramp_result['phase']
-                        current_stats['velocity'] = tramp_result['velocity']
-                        current_stats['trunk_thigh_angle'] = tramp_result['trunk_thigh_angle']
-                        current_stats['thigh_shin_angle'] = tramp_result['thigh_shin_angle']
-                        current_stats['state'] = tramp_result['current_action']
-                        current_stats['form_score'] = 100
-                        current_stats['grade'] = '--'
-                        current_stats['feedback'] = f"Phase: {tramp_result['phase']}"
-                        current_stats['bed_info'] = getattr(analyzer.bed_tracker, 'current_info', current_stats.get('bed_info')) if getattr(analyzer, 'bed_tracker', None) is not None else current_stats.get('bed_info')
-                        current_stats['landings'] = [j.get('landing') for j in tramp_result.get('completed_jumps', []) if j.get('landing')]
-                        current_stats['latest_landing'] = current_stats['landings'][-1] if current_stats['landings'] else None
+                    tramp_result = analyzer.process_frame(frame, pose_results.pose_landmarks.landmark, frame_count)
+                    current_stats['reps'] = tramp_result['jump_count']
+                    current_stats['jump_count'] = tramp_result['jump_count']
+                    current_stats['current_action'] = tramp_result['current_action']
+                    current_stats['phase'] = tramp_result['phase']
+                    current_stats['velocity'] = tramp_result['velocity']
+                    current_stats['trunk_thigh_angle'] = tramp_result['trunk_thigh_angle']
+                    current_stats['thigh_shin_angle'] = tramp_result['thigh_shin_angle']
+                    current_stats['state'] = tramp_result['current_action']
+                    current_stats['feedback'] = f"Phase: {tramp_result['phase']}"
+                    current_stats['bed_info'] = getattr(analyzer.bed_tracker, 'current_info', current_stats.get('bed_info'))
+                    current_stats['landings'] = [j.get('landing') for j in tramp_result.get('completed_jumps', []) if j.get('landing')]
+                    current_stats['latest_landing'] = current_stats['landings'][-1] if current_stats['landings'] else None
 
-                        results['reps'] = tramp_result['jump_count']
-                        results['current_action'] = tramp_result['current_action']
-                        results['completed_jumps'] = tramp_result['completed_jumps']
-                        results['state'] = tramp_result['current_action']
-                        results['form_score'] = 100
-                        results['avg_form_score'] = 100
-                        results['grade'] = '--'
-                        results['feedback'] = f"Phase: {tramp_result['phase']}"
+                    results['reps'] = tramp_result['jump_count']
+                    results['current_action'] = tramp_result['current_action']
+                    results['completed_jumps'] = tramp_result['completed_jumps']
+                    results['state'] = tramp_result['current_action']
+                    results['form_score'] = 100
+                    results['avg_form_score'] = 100
+                    results['grade'] = '--'
+                    results['feedback'] = f"Phase: {tramp_result['phase']}"
 
-                        if (frame_count // analyze_skip) % 30 == 0:
-                            print(f"[Frame {frame_count}] Jumps: {tramp_result['jump_count']}, Action: {tramp_result['current_action']}, Phase: {tramp_result['phase']}")
-                    else:
-                        engine.process_frame(frame, pose_results.pose_landmarks.landmark)
-                        status = engine.get_status()
+                    if (frame_count // analyze_skip) % 30 == 0:
+                        print(
+                            f"[Frame {frame_count}] Jumps: {tramp_result['jump_count']}, "
+                            f"Action: {tramp_result['current_action']}, Phase: {tramp_result['phase']}"
+                        )
 
-                        current_stats['reps'] = status.get('counter', 0)
-                        current_stats['form_score'] = status.get('form_score', 100)
-                        current_stats['grade'] = status.get('form_grade', 'A')
-                        current_stats['state'] = status.get('current_state', 'UNKNOWN')
-                        current_stats['feedback'] = status.get('feedback', '')
+            frame = draw_trampoline_overlay(frame, current_stats, current_stats.get('bed_info'))
 
-                        results['reps'] = current_stats['reps']
-                        results['form_score'] = current_stats['form_score']
-                        results['avg_form_score'] = status.get('avg_form_score', 100)
-                        results['grade'] = current_stats['grade']
-                        results['state'] = current_stats['state']
-                        results['feedback'] = current_stats['feedback']
-
-                        if (frame_count // analyze_skip) % 30 == 0:
-                            print(f"[Frame {frame_count}] Counter: {status.get('counter', 0)}, State: {status.get('current_state')}, Left: {status.get('counter_left', 'N/A')}, Right: {status.get('counter_right', 'N/A')}")
-
-            # Draw stats overlay
-            if is_trampoline:
-                frame = draw_trampoline_overlay(frame, current_stats, current_stats.get('bed_info'))
-            else:
-                frame = draw_stats_overlay(frame, current_stats)
-            
-            # Write frame to output video
             if imageio_writer:
-                # Convert BGR to RGB for imageio
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                imageio_writer.append_data(frame_rgb)
+                imageio_writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             elif out:
                 out.write(frame)
-            
-            # Save intermediate results (more often for trampoline for responsive UI)
-            save_interval = 15 if is_trampoline else 60
-            if frame_count % save_interval == 0:
+
+            if frame_count % 15 == 0:
                 save_results()
-            
-            # Memory management
+
             del rgb_frame
             if frame_count % 100 == 0:
                 gc.collect()
-        
-        # Cleanup video capture
+
         if cap:
             cap.release()
         if pose:
             pose.close()
-        
-        # IMPORTANT: Write final stats to results (in case last frame didn't trigger update)
+
         results['reps'] = current_stats['reps']
         results['form_score'] = current_stats['form_score']
+        results['avg_form_score'] = 100
         results['grade'] = current_stats['grade']
         results['state'] = 'COMPLETED'
         results['feedback'] = current_stats['feedback']
         results['fps'] = fps
         results['total_frames'] = total_frames
-        results['resolution'] = f"{width}x{height}"
+        results['resolution'] = f'{width}x{height}'
+        results['current_action'] = current_stats.get('current_action', '--')
+        results['completed_jumps'] = analyzer.completed_jumps
 
-        if is_trampoline:
-            results['current_action'] = current_stats.get('current_action', '--')
-            results['completed_jumps'] = analyzer.completed_jumps
-            # Write diagnostic CSV for jump detection analysis
-            diag_path = output_json_path.rsplit('.', 1)[0] + '_diagnostics.csv'
-            analyzer.dump_diagnostics(diag_path)
-        
-        # Close video writers
+        diag_path = output_json_path.rsplit('.', 1)[0] + '_diagnostics.csv'
+        analyzer.dump_diagnostics(diag_path)
+
         if imageio_writer:
             try:
                 imageio_writer.close()
-                print(f"H.264 video saved: {output_video_path}")
-            except Exception as e:
-                print(f"Error closing imageio writer: {e}")
+                print(f'H.264 video saved: {output_video_path}')
+            except Exception as exc:
+                print(f'Error closing imageio writer: {exc}')
         if out:
             out.release()
-        
+
         gc.collect()
-        
         results['status'] = 'completed'
         results['progress'] = 100
-        
-        # Debug: Print final values
-        print(f"=== FINAL RESULTS ===")
-        print(f"Mode: {results.get('mode', 'fitness')}")
-        print(f"Reps from current_stats: {current_stats['reps']}")
-        print(f"Reps written to results: {results['reps']}")
-        print(f"Form Score: {results['form_score']}")
-        print(f"Grade: {results['grade']}")
-        print(f"State: {results['state']}")
 
-        if is_trampoline:
-            print(f"Completed jumps: {len(analyzer.completed_jumps)}")
-            for j in analyzer.completed_jumps:
-                print(f"  Jump {j['jump_number']}: {j['action']} (flight={j['flight_frames']}f, intermediate={j['is_intermediate']})")
-        else:
-            # Get final status from engine for verification
-            final_status = engine.get_status()
-            print(f"Engine final counter: {final_status.get('counter', 'N/A')}")
-            print(f"Engine final state: {final_status.get('current_state', 'N/A')}")
-            if final_status.get('counter_left') is not None:
-                print(f"Engine counter_left: {final_status.get('counter_left')}")
-                print(f"Engine counter_right: {final_status.get('counter_right')}")
-        print(f"=====================")
-        
+        print('=== FINAL RESULTS ===')
+        print(f"Mode: {results.get('mode', 'trampoline')}")
+        print(f"Jumps written to results: {results['reps']}")
+        print(f"State: {results['state']}")
+        print(f"Completed jumps: {len(analyzer.completed_jumps)}")
+        for jump in analyzer.completed_jumps:
+            print(
+                f"  Jump {jump['jump_number']}: {jump['action']} "
+                f"(flight={jump['flight_frames']}f, intermediate={jump['is_intermediate']})"
+            )
+        print('=====================')
+
         save_results()
-        
-        print(f"Completed: {frame_count} frames, {results['reps']} reps")
+        print(f'Completed: {frame_count} frames, {results["reps"]} jumps')
         if output_video_path:
-            print(f"Output video saved: {output_video_path}")
-        
-    except Exception as e:
+            print(f'Output video saved: {output_video_path}')
+
+    except Exception as exc:
         results['status'] = 'error'
-        results['error'] = str(e)
+        results['error'] = str(exc)
         save_results()
-        print(f"Error: {e}")
+        print(f'Error: {exc}')
         import traceback
         traceback.print_exc()
     finally:
         if cap:
             try:
                 cap.release()
-            except:
+            except Exception:
                 pass
         if imageio_writer:
             try:
                 imageio_writer.close()
-            except:
+            except Exception:
                 pass
         if out:
             try:
                 out.release()
-            except:
+            except Exception:
                 pass
         if pose:
             try:
                 pose.close()
-            except:
+            except Exception:
                 pass
         gc.collect()
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print("Usage: python video_processor.py <video_path> <exercise_type> <output_json_path> [output_video_path]")
+        print('Usage: python video_processor.py <video_path> <exercise_type> <output_json_path> [output_video_path]')
         sys.exit(1)
-    
+
     video_path = sys.argv[1]
     exercise_type = sys.argv[2]
     output_json_path = sys.argv[3]
     output_video_path = sys.argv[4] if len(sys.argv) > 4 else None
-    
     process_video(video_path, exercise_type, output_json_path, output_video_path)

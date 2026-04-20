@@ -167,52 +167,13 @@
     padding-bottom: 5px;
 }
 
-/* Exercise Dropdown */
-.exercise-dropdown {
-    width: 100%;
-    padding: 12px;
-    border: 2px solid #ddd;
-    border-radius: 8px;
-    font-size: 1rem;
-    background-color: white;
-    cursor: pointer;
-    transition: border-color 0.3s;
-}
-
-.exercise-dropdown:focus {
-    outline: none;
-    border-color: #3498db;
-}
-
-.exercise-info-mini {
+/* Analysis Scope Summary */
+.analysis-info-mini {
     margin-top: 10px;
     padding: 10px;
     background-color: #f8f9fa;
     border-radius: 5px;
     border-left: 3px solid #3498db;
-}
-
-.exercise-info-mini.hidden {
-    display: none;
-}
-
-.mini-badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    color: white;
-    margin-bottom: 5px;
-}
-
-.mini-badge.standard { background-color: #3498db; }
-.mini-badge.bilateral { background-color: #9b59b6; }
-.mini-badge.duration { background-color: #e67e22; }
-
-#mini-description {
-    font-size: 0.85rem;
-    color: #666;
-    margin: 0;
 }
 
 /* Stats Grid */

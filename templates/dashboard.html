@@ -1,150 +1,102 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness Tracker Dashboard</title>
+    <title>蹦床仪表盘</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
+    <div class="container trampoline-shell-page">
         <header>
-            <h1>Fitness Tracker Dashboard</h1>
-            <p>Track your workout progress</p>
+            <h1>蹦床仪表盘</h1>
+            <p>保留图表与摘要布局，作为后续蹦床训练数据看板的占位页。</p>
             <nav class="main-nav">
                 <ul>
-                    <li><a href="/" class="nav-link">Home</a></li>
-                    <li><a href="/dashboard" class="nav-link active">Dashboard</a></li>
-                    <li><a href="/profile" class="nav-link">Profile</a></li>
+                    <li><a href="/" class="nav-link">首页</a></li>
+                    <li><a href="/dashboard" class="nav-link active">仪表盘</a></li>
+                    <li><a href="/profile" class="nav-link">档案</a></li>
+                    <li><a href="/video_analysis" class="nav-link">视频分析</a></li>
                 </ul>
             </nav>
         </header>
-        
-        <div class="dashboard-content">
+
+        <div class="dashboard-content trampoline-dashboard-shell">
             <div class="stats-summary">
+                {% for card in summary_cards %}
                 <div class="stat-card">
-                    <h3>Total Workouts</h3>
-                    <p class="stat-value">{{ total_workouts }}</p>
+                    <h3>{{ card.title }}</h3>
+                    <p class="stat-value">{{ card.value }}</p>
+                    <p class="stat-note">{{ card.note }}</p>
                 </div>
-                <div class="stat-card">
-                    <h3>Total Exercises</h3>
-                    <p class="stat-value">{{ total_exercises }}</p>
-                </div>
-                <div class="stat-card">
-                    <h3>This Week</h3>
-                    <p class="stat-value">{{ weekly_workouts }}</p>
-                </div>
-                <div class="stat-card">
-                    <h3>Streak</h3>
-                    <p class="stat-value">{{ streak_days }} days</p>
-                </div>
+                {% endfor %}
             </div>
-            
+
             <div class="charts-container">
                 <div class="chart-card">
-                    <h3>Weekly Activity</h3>
+                    <h3>训练热度占位图</h3>
                     <canvas id="weeklyChart"></canvas>
                 </div>
                 <div class="chart-card">
-                    <h3>Exercise Distribution</h3>
-                    <canvas id="exerciseChart"></canvas>
+                    <h3>动作分布占位图</h3>
+                    <canvas id="actionChart"></canvas>
                 </div>
             </div>
-            
-            <div class="recent-workouts">
-                <h2>Recent Workouts</h2>
-                <table class="workout-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Exercise</th>
-                            <th>Sets</th>
-                            <th>Reps</th>
-                            <th>Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for workout in recent_workouts %}
-                        <tr>
-                            <td>{{ workout.date }}</td>
-                            <td>{{ workout.exercise }}</td>
-                            <td>{{ workout.sets }}</td>
-                            <td>{{ workout.reps }}</td>
-                            <td>{{ workout.duration }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+
+            <div class="project-notes trampoline-dashboard-notes">
+                <h2>当前迁移说明</h2>
+                <ul class="placeholder-list">
+                    {% for item in highlights %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
             </div>
         </div>
     </div>
-    
+
     <script>
-        // Sample data for charts - would be replaced with data from backend
         const weeklyData = {
-            labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+            labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
             datasets: [{
-                label: 'Workout Minutes',
-                data: [30, 45, 0, 60, 20, 0, 45],
-                backgroundColor: 'rgba(52, 152, 219, 0.5)',
+                label: '占位数据',
+                data: [2, 3, 2, 4, 3, 1, 2],
+                backgroundColor: 'rgba(52, 152, 219, 0.45)',
                 borderColor: 'rgba(52, 152, 219, 1)',
-                borderWidth: 1
-            }]
+                borderWidth: 1,
+            }],
         };
-        
-        const exerciseData = {
-            labels: ['Squats', 'Push Ups', 'Hammer Curls'],
+
+        const landingData = {
+            labels: ['基础跳', '团身', '分腿', '预留动作'],
             datasets: [{
-                data: [40, 35, 25],
+                data: [35, 25, 20, 20],
                 backgroundColor: [
                     'rgba(52, 152, 219, 0.7)',
                     'rgba(46, 204, 113, 0.7)',
-                    'rgba(155, 89, 182, 0.7)'
+                    'rgba(155, 89, 182, 0.7)',
+                    'rgba(241, 196, 15, 0.7)'
                 ],
-                borderColor: [
-                    'rgba(52, 152, 219, 1)',
-                    'rgba(46, 204, 113, 1)',
-                    'rgba(155, 89, 182, 1)'
-                ],
-                borderWidth: 1
-            }]
+                borderWidth: 1,
+            }],
         };
-        
-        // Initialize charts
+
         window.addEventListener('DOMContentLoaded', () => {
-            const weeklyChart = new Chart(
-                document.getElementById('weeklyChart'),
-                {
-                    type: 'bar',
-                    data: weeklyData,
-                    options: {
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                }
-            );
-            
-            const exerciseChart = new Chart(
-                document.getElementById('exerciseChart'),
-                {
-                    type: 'doughnut',
-                    data: exerciseData,
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            legend: {
-                                position: 'bottom',
-                            }
-                        }
-                    }
-                }
-            );
+            new Chart(document.getElementById('weeklyChart'), {
+                type: 'bar',
+                data: weeklyData,
+                options: { responsive: true, scales: { y: { beginAtZero: true } } },
+            });
+            new Chart(document.getElementById('actionChart'), {
+                type: 'doughnut',
+                data: landingData,
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom' } },
+                },
+            });
         });
     </script>
 </body>

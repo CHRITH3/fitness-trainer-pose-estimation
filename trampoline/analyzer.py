@@ -1,8 +1,8 @@
 """
-TrampolineAnalyzer — Orchestrates JumpDetector + ActionClassifier.
+TrampolineAnalyzer — orchestrates JumpDetector + ActionClassifier.
 
-Drop-in replacement for ExerciseEngine when processing trampoline videos.
-Compatible interface: process_frame(frame, landmarks, frame_idx) and get_status().
+Provides the stable trampoline-analysis interface used by the video processor:
+process_frame(frame, landmarks, frame_idx) and get_status().
 """
 
 from trampoline.jump_detector import JumpDetector

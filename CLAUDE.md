@@ -4,9 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI-powered fitness trainer web app that uses MediaPipe pose estimation for real-time exercise tracking with form scoring. Also includes a trampoline analysis module for jump detection and action classification.
+This repository is now a **trampoline-only** video analysis project.
 
-**Tech stack:** Python/Flask backend, vanilla HTML/CSS/JS frontend, MediaPipe 0.10.9 for pose estimation, OpenCV for video processing, imageio-ffmpeg for H.264 encoding, openai SDK for Qianwen LLM integration (OpenAI-compatible API, config via `QWEN_API_KEY`/`QWEN_BASE_URL`/`QWEN_MODEL` env vars).
+**Current product surface:**
+- trampoline video upload and calibration
+- jump segmentation and action classification
+- processed-video playback
+- SSE-based LLM analysis
+- placeholder shells for `/`, `/dashboard`, and `/profile`
+
+**Tech stack:** Python/Flask backend, vanilla HTML/CSS/JS frontend, MediaPipe 0.10.9 for pose estimation, OpenCV for video processing, imageio-ffmpeg for H.264 encoding, openai SDK for Qianwen-compatible LLM integration (`QWEN_API_KEY` / `DASHSCOPE_API_KEY`).
 
 ## Commands
 
@@ -14,70 +21,59 @@ AI-powered fitness trainer web app that uses MediaPipe pose estimation for real-
 # Run the web app (serves on http://127.0.0.1:5000)
 python app.py
 
-# Run exercise engine tests (custom test runner, not pytest)
-python test_engine.py
-
-# Run trampoline module tests (pytest)
-pytest tests/test_trampoline.py -v
-
-# Run a single trampoline test
-pytest tests/test_trampoline.py::test_function_name -v
+# Run core trampoline tests
+python -m pytest tests/test_trampoline.py -v
+python -m pytest tests/test_trampoline_api.py -v
+python -m pytest tests/test_bed_tracker.py -v
+python -m pytest tests/test_trampoline_frontend_contract.py -v
+python -m pytest tests/test_app_route_contract.py -v
+python -m pytest tests/test_llm_service.py -v
 
 # Standalone video analysis
-python video_processor.py <video_path> <exercise_type> <output_json> [output_video]
+python video_processor.py <video_path> trampoline <output_json> [output_video]
 ```
 
 ## Architecture
 
-### Exercise Engine (FSM-based)
+### Flask app
 
-The core exercise system uses a **Finite State Machine** pattern: `START → DESCENT → ASCENT (rep counted) → START`.
+- **`app.py`** — Flask server and route contract
+  - retained pages: `/`, `/dashboard`, `/profile`, `/video_analysis`
+  - retained APIs: trampoline upload / start / status / processed / llm_analysis
+  - no legacy non-trampoline routes remain in the intended end state
 
-- **`exercises/base_exercise.py`** — FSM core with three subclasses:
-  - `BaseExercise` — standard repetition exercises (squat, push_up, etc.)
-  - `BilateralExercise` — left/right tracking (bicep_curl, lunge, lateral_raise)
-  - `DurationExercise` — time-based holds (plank, wall_sit)
-- **`exercises/loader.py`** — Parses YAML definitions, validates configs, returns the correct subclass
-- **`exercises/engine.py`** — High-level wrapper: `process_frame(frame, landmarks)` → runs FSM, calculates form score, renders overlays
-- **`exercises/definitions/*.yaml`** — 18 exercise definitions. New exercises can be added as YAML without code changes
+### Trampoline module
 
-### Form Score System
+- **`trampoline/analyzer.py`** — orchestrates jump detection + action classification
+- **`trampoline/jump_detector.py`** — takeoff / landing segmentation
+- **`trampoline/action_classifier.py`** — jump action classification
+- **`trampoline/bed_tracker.py`** — trampoline bed calibration, tracking, landing mapping
+- **`trampoline/overlay.py`** — video overlay rendering
+- **`trampoline/llm_service.py`** — builds analysis report + streams Qianwen-compatible SSE output
 
-Score 0-100 composed of: angle accuracy (40%), tempo compliance (30%), form feedback penalties (30%). Grades: A (90+), B (80+), C (70+), D (60+), F (<60).
+### Video processing flow
 
-### Trampoline Module
+`video_processor.py` is kept as the stable subprocess entrypoint. It is now expected to process **trampoline-only** jobs.
 
-- **`trampoline/analyzer.py`** — Orchestrator, drop-in replacement for ExerciseEngine with same `process_frame()` interface
-- **`trampoline/jump_detector.py`** — Detects takeoff/landing events via velocity extremum detection
-- **`trampoline/action_classifier.py`** — Classifies jump actions (Straight/Pike/Tuck/Straddle) using trunk-thigh, thigh-shin angles and leg spread ratio, with hysteresis
-- **`trampoline/config.py`** — Thresholds and constants
-- **`trampoline/overlay.py`** — Video overlay drawing (stats panel, angle arcs, velocity bar), auto-scales with resolution
-- **`trampoline/llm_service.py`** — LLM integration: builds AnalysisReport from analysis results, constructs prompt, streams Qianwen responses via OpenAI-compatible API, cleans/segments output into structured sections
-
-### Web App Flow
-
-`app.py` is the Flask server. Real-time tracking uses an MJPEG stream via `/video_feed` with a `generate_frames()` loop that runs MediaPipe + ExerciseEngine per frame. Video analysis uploads run `video_processor.py` as a subprocess and poll status via `/api/video/status/<id>`.
-
-### Pose Estimation
-
-`pose_estimation/estimation.py` wraps MediaPipe Pose. `pose_estimation/angle_calculation.py` provides angle math utilities. MediaPipe uses 33 body landmarks; the exercise engine maps named landmarks (e.g., `left_shoulder` → index 11) via `BaseExercise.LANDMARK_MAP`.
-
-## YAML Exercise Definition Format
-
-Each exercise YAML defines: `angles` (body points to track), `states` (FSM conditions on angle values), `counter` (which state transition counts a rep), `feedback` (form warnings), and `visualization` (skeleton overlay config). See any file in `exercises/definitions/` for examples.
+Flow:
+1. `/api/video/upload`
+2. pending calibration
+3. `/api/video/trampoline/start`
+4. subprocess analysis via `video_processor.py`
+5. polling via `/api/video/status/<id>`
+6. processed video / LLM analysis
 
 ## Notes
 
-- Code comments are in Turkish; keep this convention when modifying existing code
-- MediaPipe is pinned to 0.10.9 — newer versions have breaking API changes
-- Camera and PoseEstimator are lazily initialized to reduce memory usage
-- Frame processing uses a global `lock` for thread safety in the MJPEG stream
-- `db/workout_logger.py` is currently a stub
+- Some historical notes may still mention the older mixed-product era; prefer the current trampoline-only route/API contract over older wording.
+- MediaPipe is pinned to 0.10.9.
+- Keep public URLs stable: `/`, `/dashboard`, `/profile`, `/video_analysis`.
+- Placeholder dashboard/profile pages are intentional; they preserve future trampoline product expansion space.
 
 ## Workflow Conventions
 
-- **Git 提交**：每完成一项任务立即提交一个 git commit，commit message 使用简略中文描述
-- **任务文档**：每项任务完成后在 `trampoline/docs/` 目录下生成一份详细的任务执行说明文档，命名规则为 `YYYY-MM-DD-≤10字中文任务简介.md`
+- **Git 提交**：提交信息遵循仓库 Lore protocol，用提交正文记录约束、取舍、验证与风险
+- **任务文档**：当任务会改变产品语义、架构约定或清理范围时，在 `trampoline/docs/` 目录下补充中文执行说明，命名规则为 `YYYY-MM-DD-≤10字中文任务简介.md`
 - **CLAUDE.md 同步**：当发生以下变更时，主动提醒用户是否需要更新 CLAUDE.md：
   - 新增或删除核心模块/组件
   - 技术栈变化（换框架、升级有 breaking change 的依赖）
