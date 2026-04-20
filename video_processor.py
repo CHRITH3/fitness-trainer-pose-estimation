@@ -95,6 +95,11 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         'mode': 'trampoline',
         'current_action': '--',
         'completed_jumps': [],
+        'phase': 'unknown',
+        'current_flight_frames': 0,
+        'current_flight_duration_s': 0.0,
+        'latest_landing': None,
+        'landings': [],
     }
 
     def save_results():
@@ -123,6 +128,8 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        results['fps'] = fps
+        results['video_fps'] = fps
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         print(f'Video: {width}x{height} @ {fps:.1f} fps, {total_frames} frames')
@@ -215,6 +222,8 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
             'jump_count': 0,
             'current_action': '--',
             'phase': 'unknown',
+            'current_flight_frames': 0,
+            'current_flight_duration_s': 0.0,
             'velocity': 0,
             'trunk_thigh_angle': 0,
             'thigh_shin_angle': 0,
@@ -251,18 +260,25 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
                     current_stats['jump_count'] = tramp_result['jump_count']
                     current_stats['current_action'] = tramp_result['current_action']
                     current_stats['phase'] = tramp_result['phase']
+                    current_stats['current_flight_frames'] = tramp_result.get('current_flight_frames', 0)
+                    current_stats['current_flight_duration_s'] = tramp_result.get('current_flight_duration_s', 0.0)
                     current_stats['velocity'] = tramp_result['velocity']
                     current_stats['trunk_thigh_angle'] = tramp_result['trunk_thigh_angle']
                     current_stats['thigh_shin_angle'] = tramp_result['thigh_shin_angle']
                     current_stats['state'] = tramp_result['current_action']
                     current_stats['feedback'] = f"Phase: {tramp_result['phase']}"
                     current_stats['bed_info'] = getattr(analyzer.bed_tracker, 'current_info', current_stats.get('bed_info'))
-                    current_stats['landings'] = [j.get('landing') for j in tramp_result.get('completed_jumps', []) if j.get('landing')]
-                    current_stats['latest_landing'] = current_stats['landings'][-1] if current_stats['landings'] else None
+                    current_stats['landings'] = tramp_result.get('landings', [])
+                    current_stats['latest_landing'] = tramp_result.get('latest_landing')
 
                     results['reps'] = tramp_result['jump_count']
                     results['current_action'] = tramp_result['current_action']
                     results['completed_jumps'] = tramp_result['completed_jumps']
+                    results['phase'] = tramp_result['phase']
+                    results['current_flight_frames'] = tramp_result.get('current_flight_frames', 0)
+                    results['current_flight_duration_s'] = tramp_result.get('current_flight_duration_s', 0.0)
+                    results['latest_landing'] = tramp_result.get('latest_landing')
+                    results['landings'] = tramp_result.get('landings', [])
                     results['state'] = tramp_result['current_action']
                     results['form_score'] = 100
                     results['avg_form_score'] = 100
@@ -301,10 +317,16 @@ def process_video(video_path: str, exercise_type: str, output_json_path: str, ou
         results['state'] = 'COMPLETED'
         results['feedback'] = current_stats['feedback']
         results['fps'] = fps
+        results['video_fps'] = fps
         results['total_frames'] = total_frames
         results['resolution'] = f'{width}x{height}'
         results['current_action'] = current_stats.get('current_action', '--')
         results['completed_jumps'] = analyzer.completed_jumps
+        results['phase'] = current_stats.get('phase', 'unknown')
+        results['current_flight_frames'] = current_stats.get('current_flight_frames', 0)
+        results['current_flight_duration_s'] = current_stats.get('current_flight_duration_s', 0.0)
+        results['latest_landing'] = current_stats.get('latest_landing')
+        results['landings'] = current_stats.get('landings', [])
 
         diag_path = output_json_path.rsplit('.', 1)[0] + '_diagnostics.csv'
         analyzer.dump_diagnostics(diag_path)

@@ -353,6 +353,45 @@ class TestTrampolineAnalyzer:
         assert "phase" in result
         assert "velocity" in result
         assert "completed_jumps" in result
+        assert "current_flight_frames" in result
+        assert "current_flight_duration_s" in result
+        assert "latest_landing" in result
+        assert "landings" in result
+
+    def test_live_flight_runtime_fields_do_not_change_segmentation(self):
+        ta = TrampolineAnalyzer(fps=30.0)
+        frame_img = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame_idx = 0
+
+        for _ in range(10):
+            frame_idx += 1
+            ta.process_frame(frame_img, make_landmarks_at_y(0.6, 0.8), frame_idx=frame_idx)
+
+        for i in range(8):
+            frame_idx += 1
+            com_y = 0.6 - sum(range(1, i + 2)) * 0.005
+            ta.process_frame(frame_img, make_landmarks_at_y(com_y, com_y + 0.2), frame_idx=frame_idx)
+
+        result = None
+        for i in range(8):
+            frame_idx += 1
+            speed = 0.04 - (i + 1) * 0.004
+            com_y -= max(0.001, speed)
+            result = ta.process_frame(frame_img, make_landmarks_at_y(com_y, com_y + 0.2), frame_idx=frame_idx)
+            if result["phase"] == "flight" and result["current_flight_frames"] >= 3:
+                break
+
+        assert result["phase"] == "flight"
+        assert result["jump_count"] == 0
+        assert result["current_flight_frames"] >= 3
+        assert result["current_flight_duration_s"] == pytest.approx(result["current_flight_frames"] / 30.0)
+
+        status = ta.get_status()
+        assert status["phase"] == "flight"
+        assert status["current_flight_frames"] == result["current_flight_frames"]
+        assert status["current_flight_duration_s"] == pytest.approx(result["current_flight_duration_s"])
+        assert status["fps"] == 30.0
+        assert status["video_fps"] == 30.0
 
     def test_process_many_frames_no_crash(self):
         """Process 100 frames of synthetic data without crashing."""
@@ -407,6 +446,8 @@ class TestTrampolineLandingIntegration:
 
         assert result["jump_count"] == 1
         assert ta.completed_jumps[0]["landing"]["confidence"] == 0.42
+        assert result["latest_landing"] == ta.completed_jumps[0]["landing"]
+        assert result["landings"] == [ta.completed_jumps[0]["landing"]]
         assert tracker.calls, "landing payload should be computed only from landing event path"
 
     def test_landing_mapping_failure_preserves_jump_result(self):

@@ -73,6 +73,73 @@ def test_trampoline_upload_returns_pending_calibration_contract_fields(tmp_path)
     assert payload["corner_order"] == app_module.TRAMPOLINE_CORNER_ORDER
 
 
+def test_status_exposes_additive_runtime_fields(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+    landing = {
+        "bed_xy_m": [2.0, 1.0],
+        "norm_xy": [0.5, 0.5],
+        "zone": "center",
+        "confidence": 0.9,
+    }
+    app_module.video_analyses[video_id].update({
+        "status": "processing",
+        "progress": 50,
+        "phase": "flight",
+        "current_flight_frames": 12,
+        "current_flight_duration_s": 0.4,
+        "latest_landing": landing,
+        "landings": [landing],
+        "fps": 30.0,
+    })
+
+    response = client.get(f"/api/video/status/{video_id}")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "processing"
+    assert payload["phase"] == "flight"
+    assert payload["current_flight_frames"] == 12
+    assert payload["current_flight_duration_s"] == pytest.approx(0.4)
+    assert payload["latest_landing"] == landing
+    assert payload["landings"] == [landing]
+    assert payload["fps"] == 30.0
+    assert payload["video_fps"] == 5.0
+    assert payload["completed_jumps"] == []
+
+
+def test_sync_analysis_from_results_preserves_runtime_seam():
+    landing = {
+        "bed_xy_m": [2.0, 1.0],
+        "norm_xy": [0.5, 0.5],
+        "zone": "center",
+        "confidence": 0.9,
+    }
+    analysis = {}
+
+    app_module._sync_analysis_from_results(analysis, {
+        "status": "processing",
+        "progress": 25,
+        "phase": "flight",
+        "current_flight_frames": 9,
+        "current_flight_duration_s": 0.3,
+        "latest_landing": landing,
+        "landings": [landing],
+        "fps": 30.0,
+        "video_fps": 30.0,
+        "completed_jumps": [{"jump_number": 1, "landing": landing}],
+    })
+
+    assert analysis["phase"] == "flight"
+    assert analysis["current_flight_frames"] == 9
+    assert analysis["current_flight_duration_s"] == pytest.approx(0.3)
+    assert analysis["latest_landing"] == landing
+    assert analysis["landings"] == [landing]
+    assert analysis["fps"] == 30.0
+    assert analysis["video_fps"] == 30.0
+    assert analysis["completed_jumps"][0]["landing"] == landing
+
+
 def test_trampoline_upload_start_and_processing_idempotency(tmp_path):
     client = app_module.app.test_client()
     video_id = upload_trampoline(client, tmp_path)

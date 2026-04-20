@@ -16,12 +16,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressText = document.getElementById('progress-text');
 
     const statReps = document.getElementById('stat-reps');
-    const statScore = document.getElementById('stat-score');
-    const statGrade = document.getElementById('stat-grade');
-    const statState = document.getElementById('stat-state');
+    const statFlightTime = document.getElementById('stat-flight-time');
     const statAction = document.getElementById('stat-action');
-    const gaugeFill = document.getElementById('gauge-fill');
-    const gaugeValue = document.getElementById('gauge-value');
+    const statLanding = document.getElementById('stat-landing');
+    const landingMap = document.getElementById('landing-map');
+    const landingMapBed = document.getElementById('landing-map-bed');
     const feedbackLog = document.getElementById('feedback-log');
     const reportSection = document.getElementById('report-section');
     const reportContent = document.getElementById('report-content');
@@ -41,6 +40,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const calibrationGeometry = window.TrampolineCalibrationGeometry;
     const trampolineCalibrationUi = window.TrampolineCalibrationUI;
+    const videoAnalysisHelpers = window.VideoAnalysisHelpers;
+
+    if (!calibrationGeometry || !trampolineCalibrationUi || !videoAnalysisHelpers) {
+        throw new Error('Required trampoline/video analysis helpers failed to load');
+    }
 
     let videoFile = null;
     let isAnalyzing = false;
@@ -52,7 +56,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let analysisResults = {
         reps: 0,
-        scores: [],
         feedbacks: [],
         startTime: null,
         endTime: null,
@@ -97,15 +100,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function resetStats() {
         statReps.textContent = '0';
-        statScore.textContent = '--';
-        statGrade.textContent = '--';
-        statGrade.className = 'stat-value grade';
-        statState.textContent = '--';
+        statFlightTime.textContent = '--';
         statAction.textContent = '--';
         statAction.className = 'stat-value action-name';
-        gaugeValue.textContent = '--';
-        gaugeFill.style.strokeDashoffset = 251.2;
-        gaugeFill.style.stroke = '#27ae60';
+        statLanding.textContent = '--';
+        renderLandingMap([]);
         progressFill.style.width = '0%';
         progressText.textContent = '0%';
     }
@@ -129,15 +128,63 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/\n/g, '<br>');
     }
 
+    const { finiteNumber, validLanding, resolveCompactStats } = videoAnalysisHelpers;
+
+    function formatFixed(value, digits = 2) {
+        const n = finiteNumber(value);
+        return n === null ? '--' : n.toFixed(digits);
+    }
+
+    function getCompletedRealJumps(data = {}) {
+        const jumps = data.completed_jumps || analysisResults.completedJumps || [];
+        return Array.isArray(jumps) ? jumps.filter(j => j && !j.is_intermediate) : [];
+    }
+
+    function formatLandingText(landing) {
+        const valid = validLanding(landing);
+        if (!valid) return '--';
+        const xy = Array.isArray(valid.bed_xy_m) ? valid.bed_xy_m : null;
+        const coord = xy && finiteNumber(xy[0]) !== null && finiteNumber(xy[1]) !== null
+            ? `(${formatFixed(xy[0])}, ${formatFixed(xy[1])})m`
+            : '坐标 --';
+        const conf = finiteNumber(valid.confidence);
+        return `${coord} / conf ${conf === null ? '--' : conf.toFixed(2)}`;
+    }
+
+    function landingDotClass(landing, isLatest) {
+        const conf = finiteNumber(landing?.confidence);
+        const confidenceClass = conf === null || conf >= 0.6 ? 'high' : (conf >= 0.35 ? 'medium' : 'low');
+        return `landing-dot ${confidenceClass}${isLatest ? ' latest' : ''}`;
+    }
+
+    function renderLandingMap(landings) {
+        if (!landingMap || !landingMapBed) return;
+        landingMapBed.querySelectorAll('.landing-dot').forEach(dot => dot.remove());
+        const validLandings = (Array.isArray(landings) ? landings : []).filter(validLanding).slice(-20);
+        landingMap.classList.toggle('has-landings', validLandings.length > 0);
+        validLandings.forEach((landing, idx) => {
+            const norm = Array.isArray(landing.norm_xy) ? landing.norm_xy : null;
+            if (!norm || finiteNumber(norm[0]) === null || finiteNumber(norm[1]) === null) return;
+            const dot = document.createElement('span');
+            dot.className = landingDotClass(landing, idx === validLandings.length - 1);
+            const x = Math.max(0, Math.min(1, Number(norm[0]))) * 100;
+            const y = Math.max(0, Math.min(1, Number(norm[1]))) * 100;
+            dot.style.left = `${x}%`;
+            dot.style.top = `${y}%`;
+            dot.title = formatLandingText(landing);
+            landingMapBed.appendChild(dot);
+        });
+    }
+
     function showTrampolineReport(data) {
         const jumps = data.completed_jumps || analysisResults.completedJumps || [];
-        const jumpCount = data.reps || jumps.length;
+        const realJumps = jumps.filter(j => !j.is_intermediate);
+        const jumpCount = data.reps || realJumps.length;
         const duration = analysisResults.endTime && analysisResults.startTime
             ? Math.round((analysisResults.endTime - analysisResults.startTime) / 1000)
             : 0;
 
         const actionCounts = {};
-        const realJumps = jumps.filter(j => !j.is_intermediate);
         realJumps.forEach(j => {
             actionCounts[j.action] = (actionCounts[j.action] || 0) + 1;
         });
@@ -168,15 +215,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         const intermediateCount = jumps.filter(j => j.is_intermediate).length;
+        const detailsId = 'report-jump-details';
 
         reportContent.innerHTML = `
-            <div class="report-row"><span class="report-label">分析类型</span><span class="report-value">蹦床</span></div>
-            <div class="report-row"><span class="report-label">总跳次</span><span class="report-value">${jumpCount}</span></div>
-            ${intermediateCount > 0 ? `<div class="report-row"><span class="report-label">中间过渡跳</span><span class="report-value">${intermediateCount}</span></div>` : ''}
-            <div class="report-row"><span class="report-label">动作分布</span><span class="report-value">${actionBreakdown}</span></div>
-            ${jumpDetails}
-            <div class="report-row"><span class="report-label">处理耗时</span><span class="report-value">${duration}s</span></div>
+            <div class="report-summary">
+                <div class="report-row"><span class="report-label">分析类型</span><span class="report-value">蹦床</span></div>
+                <div class="report-row"><span class="report-label">总跳次</span><span class="report-value">${jumpCount}</span></div>
+                ${intermediateCount > 0 ? `<div class="report-row"><span class="report-label">中间过渡跳</span><span class="report-value">${intermediateCount}</span></div>` : ''}
+                <div class="report-row"><span class="report-label">动作分布</span><span class="report-value">${actionBreakdown}</span></div>
+                <div class="report-row"><span class="report-label">处理耗时</span><span class="report-value">${duration}s</span></div>
+            </div>
+            <button class="btn report-details-toggle" id="report-details-toggle" type="button" aria-expanded="false" aria-controls="${detailsId}">▸ 每跳详细数据</button>
+            <div class="report-details hidden" id="${detailsId}">${jumpDetails || '<div class="report-row"><span class="report-label">每跳详细数据</span><span class="report-value">暂无</span></div>'}</div>
         `;
+        const toggle = document.getElementById('report-details-toggle');
+        const details = document.getElementById(detailsId);
+        if (toggle && details) {
+            toggle.addEventListener('click', () => {
+                const expanded = toggle.getAttribute('aria-expanded') === 'true';
+                toggle.setAttribute('aria-expanded', String(!expanded));
+                toggle.textContent = `${expanded ? '▸' : '▾'} 每跳详细数据`;
+                details.classList.toggle('hidden', expanded);
+            });
+        }
         reportSection.classList.remove('hidden');
         llmSection.classList.remove('hidden');
         llmBtn.disabled = false;
@@ -187,31 +248,36 @@ document.addEventListener('DOMContentLoaded', function() {
             statReps.textContent = data.reps;
             analysisResults.reps = data.reps;
         }
-        if (data.form_score !== undefined) {
-            const score = Math.round(data.form_score);
-            statScore.textContent = score;
-            gaugeValue.textContent = score;
-            analysisResults.scores.push(score);
-            gaugeFill.style.strokeDashoffset = 251.2 - (251.2 * score / 100);
+        if (Array.isArray(data.completed_jumps)) {
+            analysisResults.completedJumps = data.completed_jumps;
         }
-        if (data.grade !== undefined) {
-            statGrade.textContent = data.grade;
-            statGrade.className = `stat-value grade${data.grade ? ` grade-${String(data.grade).toLowerCase()}` : ''}`;
+
+        const compactStats = resolveCompactStats(
+            data,
+            analysisResults.completedJumps,
+        );
+        statFlightTime.textContent = compactStats.flightSeconds === null ? '--' : `${compactStats.flightSeconds.toFixed(2)}s`;
+        statAction.textContent = compactStats.action || '--';
+        statAction.className = `stat-value action-name action-${String(compactStats.action || 'unknown').toLowerCase()}`;
+        statLanding.textContent = formatLandingText(compactStats.landing);
+
+        const sourceLandings = Array.isArray(data.landings)
+            ? data.landings
+            : getCompletedRealJumps(data).map(j => j.landing).filter(Boolean);
+        const landings = sourceLandings.slice();
+        if (compactStats.landing && !landings.includes(compactStats.landing)) {
+            landings.push(compactStats.landing);
         }
-        if (data.state !== undefined) {
-            statState.textContent = data.state;
-        }
-        if (data.current_action !== undefined) {
-            statAction.textContent = data.current_action;
-            statAction.className = `stat-value action-name action-${String(data.current_action).toLowerCase()}`;
-        }
+        renderLandingMap(landings);
     }
 
     function startAnalysisPolling(videoId) {
         currentVideoId = videoId;
         analysisCanvas.width = videoPlayer.videoWidth || 640;
         analysisCanvas.height = videoPlayer.videoHeight || 480;
-        analysisCanvas.hidden = false;
+        analysisCanvas.hidden = true;
+        const videoContainer = document.getElementById('video-container');
+        if (videoContainer) videoContainer.classList.remove('calibration-active');
         ctx.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
 
         videoPlayer.currentTime = 0;
@@ -363,7 +429,7 @@ document.addEventListener('DOMContentLoaded', function() {
         isAnalyzing = true;
         analyzeBtn.disabled = true;
         stopAnalysisBtn.disabled = false;
-        analysisResults = { reps: 0, scores: [], feedbacks: [], startTime: new Date(), endTime: null, completedJumps: [] };
+        analysisResults = { reps: 0, feedbacks: [], startTime: new Date(), endTime: null, completedJumps: [] };
 
         setTerminalStatus('Processing', 'running');
         addLog('开始蹦床视频分析...', 'processing');

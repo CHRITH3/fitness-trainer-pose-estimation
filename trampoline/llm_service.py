@@ -9,7 +9,6 @@ Components:
 """
 
 import os
-import json
 import time
 import dataclasses
 from collections import Counter

@@ -10,6 +10,13 @@
     const DEFAULT_CORNER_ORDER = ['front_left', 'front_right', 'back_right', 'back_left'];
     const DEFAULT_CORNER_LABELS = ['前左', '前右', '后右', '后左'];
 
+    function getCalibrationOverlayRequirement() {
+        return {
+            clickSurfaceId: 'analysis-canvas',
+            requiresLowerStandaloneCanvas: false,
+        };
+    }
+
     function describeCalibrationUiState({
         activeKeyframeFrame = null,
         activeKeyframeTimeS = 0,
@@ -36,6 +43,7 @@
             videoPlayer,
             analysisCanvas,
             geometry,
+            ImageCtor = (typeof Image !== 'undefined' ? Image : null),
             fetchImpl = (...args) => fetch(...args),
             onLog = () => {},
             onFeedback = () => {},
@@ -49,7 +57,8 @@
         }
 
         const cornerStep = documentRef.getElementById('corner-marking-step');
-        const cornerCanvas = documentRef.getElementById('corner-canvas');
+        const videoContainer = documentRef.getElementById('video-container');
+        const cornerCanvas = analysisCanvas;
         const cornerCtx = cornerCanvas ? cornerCanvas.getContext('2d') : null;
         const cornerCount = documentRef.getElementById('corner-count');
         const resetCornersBtn = documentRef.getElementById('reset-corners');
@@ -98,42 +107,69 @@
             if (deleteCalibrationBtn) deleteCalibrationBtn.disabled = !uiState.canDelete;
         }
 
+        function setOverlayActive(active) {
+            if (videoContainer) videoContainer.classList.toggle('calibration-active', Boolean(active));
+            if (!cornerCanvas) return;
+            if (!active && cornerCtx) {
+                cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
+            }
+            cornerCanvas.hidden = !active;
+        }
+
+        function clearDraft({ preserveSelection = true } = {}) {
+            activeKeyframeFrame = null;
+            activeKeyframeTimeS = 0;
+            cornerPoints = [];
+            if (!preserveSelection) selectedCalibrationFrame = null;
+            if (cornerCount) cornerCount.textContent = '0/4';
+            setOverlayActive(false);
+            updateCalibrationUi();
+        }
+
+        function currentImageSize() {
+            const width = videoPlayer.videoWidth || cornerImageSize?.width || cornerImage?.naturalWidth || cornerImage?.width || 0;
+            const height = videoPlayer.videoHeight || cornerImageSize?.height || cornerImage?.naturalHeight || cornerImage?.height || 0;
+            if (!width || !height) return null;
+            return { width, height };
+        }
+
         function updateCornerCanvasSize() {
-            if (!cornerCanvas || !cornerImage || !geometry) return;
-            const parentWidth = cornerStep ? cornerStep.clientWidth : 0;
-            const displayWidth = Math.max(320, Math.round(parentWidth || cornerImage.naturalWidth || cornerImage.width));
-            const displayHeight = Math.min(500, Math.max(240, Math.round(displayWidth * 9 / 16)));
-            cornerCanvas.width = displayWidth;
-            cornerCanvas.height = displayHeight;
-            cornerImageSize = {
-                width: cornerImage.naturalWidth || cornerImage.width,
-                height: cornerImage.naturalHeight || cornerImage.height,
-            };
-            cornerContentRect = geometry.computeContainRect(
-                cornerImageSize.width,
-                cornerImageSize.height,
-                cornerCanvas.width,
-                cornerCanvas.height
-            );
+            if (!cornerCanvas || !geometry) return;
+            const size = currentImageSize();
+            if (!size) return;
+
+            const videoRect = videoPlayer.getBoundingClientRect ? videoPlayer.getBoundingClientRect() : null;
+            const containerRect = videoContainer && videoContainer.getBoundingClientRect ? videoContainer.getBoundingClientRect() : null;
+            const cssWidth = Math.max(1, Math.round(videoRect?.width || size.width));
+            const cssHeight = Math.max(1, Math.round(videoRect?.height || size.height));
+
+            cornerCanvas.width = cssWidth;
+            cornerCanvas.height = cssHeight;
+            cornerCanvas.style.width = `${cssWidth}px`;
+            cornerCanvas.style.height = `${cssHeight}px`;
+            if (videoRect && containerRect) {
+                cornerCanvas.style.left = `${videoRect.left - containerRect.left}px`;
+                cornerCanvas.style.top = `${videoRect.top - containerRect.top}px`;
+            } else {
+                cornerCanvas.style.left = '0px';
+                cornerCanvas.style.top = '0px';
+            }
+            cornerImageSize = size;
+            cornerContentRect = geometry.computeContainRect(size.width, size.height, cornerCanvas.width, cornerCanvas.height);
         }
 
         function drawCornerCanvas() {
-            if (!cornerCtx || !cornerImage || !geometry) return;
+            if (!cornerCtx || !geometry) return;
             updateCornerCanvasSize();
             if (!cornerContentRect || !cornerImageSize) return;
+            cornerCanvas.hidden = false;
             cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-            cornerCtx.fillStyle = '#111';
-            cornerCtx.fillRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-            cornerCtx.drawImage(
-                cornerImage,
-                cornerContentRect.x,
-                cornerContentRect.y,
-                cornerContentRect.width,
-                cornerContentRect.height
-            );
-            cornerCtx.lineWidth = 3;
+            cornerCtx.save();
+            cornerCtx.lineWidth = Math.max(3, cornerCanvas.width / 240);
             cornerCtx.strokeStyle = '#00d4aa';
             cornerCtx.fillStyle = '#00d4aa';
+            cornerCtx.shadowColor = 'rgba(0,0,0,0.75)';
+            cornerCtx.shadowBlur = Math.max(3, cornerCanvas.width / 260);
             const displayPoints = cornerPoints
                 .map(pt => geometry.imageToDisplayPoint(pt, cornerContentRect, cornerImageSize))
                 .filter(Boolean);
@@ -147,32 +183,44 @@
                 cornerCtx.stroke();
             }
             displayPoints.forEach((pt, idx) => {
+                const radius = Math.max(7, cornerCanvas.width / 120);
                 cornerCtx.beginPath();
-                cornerCtx.arc(pt.x, pt.y, 7, 0, Math.PI * 2);
+                cornerCtx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
                 cornerCtx.fill();
                 cornerCtx.fillStyle = '#ffffff';
-                cornerCtx.font = '18px sans-serif';
-                cornerCtx.fillText(`${idx + 1}.${cornerLabels[idx]}`, pt.x + 10, pt.y - 10);
+                cornerCtx.font = `${Math.max(18, cornerCanvas.width / 45)}px sans-serif`;
+                cornerCtx.fillText(`${idx + 1}.${cornerLabels[idx]}`, pt.x + radius + 5, pt.y - radius);
                 cornerCtx.fillStyle = '#00d4aa';
             });
+            cornerCtx.restore();
         }
 
         function setDraftImageFromDataUrl(imageSrc, frameIndex, timeS) {
-            if (!cornerStep || !cornerCanvas || !cornerCtx || !imageSrc) return;
+            if (!cornerStep || !cornerCanvas || !cornerCtx) return;
             const existing = calibrationKeyframes.find(kf => kf.frame_index === frameIndex);
             activeKeyframeFrame = Math.max(0, Math.round(Number(frameIndex) || 0));
             activeKeyframeTimeS = Math.max(0, Number(timeS) || 0);
             selectedCalibrationFrame = existing ? existing.frame_index : activeKeyframeFrame;
-            pendingFrameImage = existing?.preview_image || imageSrc;
+            pendingFrameImage = existing?.preview_image || imageSrc || pendingFrameImage;
             cornerPoints = existing ? existing.corners_px.map(pt => ({ ...pt })) : [];
 
-            cornerImage = new Image();
-            cornerImage.onload = function() {
+            if (pendingFrameImage && ImageCtor) {
+                cornerImage = new ImageCtor();
+                cornerImage.onload = function() {
+                    cornerImageSize = {
+                        width: cornerImage.naturalWidth || cornerImage.width,
+                        height: cornerImage.naturalHeight || cornerImage.height,
+                    };
+                    updateCornerCanvasSize();
+                    drawCornerCanvas();
+                };
+                cornerImage.src = pendingFrameImage;
+            } else {
                 updateCornerCanvasSize();
                 drawCornerCanvas();
-            };
-            cornerImage.src = pendingFrameImage;
+            }
 
+            setOverlayActive(true);
             if (cornerCount) cornerCount.textContent = `${cornerPoints.length}/4`;
             updateCalibrationUi();
         }
@@ -273,11 +321,7 @@
                 selectedCalibrationFrame = calibrationKeyframes[0]?.frame_index ?? null;
             }
             if (activeKeyframeFrame === numericFrameIndex) {
-                cornerPoints = [];
-                activeKeyframeFrame = null;
-                activeKeyframeTimeS = 0;
-                if (cornerCount) cornerCount.textContent = '0/4';
-                drawCornerCanvas();
+                clearDraft();
             }
             renderKeyframeList();
         }
@@ -297,7 +341,7 @@
             const frameIndex = estimateFrameIndex();
             const timeS = Math.max(0, Number(videoPlayer.currentTime || 0));
             const imageSrc = captureCurrentVideoFrame();
-            if (!imageSrc) {
+            if (!imageSrc && !currentImageSize()) {
                 onFeedback('warning', '视频帧尚未准备好，请播放或稍等后再添加标定');
                 return;
             }
@@ -307,8 +351,10 @@
         }
 
         function resetDraftCorners() {
+            if (activeKeyframeFrame === null) return;
             cornerPoints = [];
             if (cornerCount) cornerCount.textContent = '0/4';
+            setOverlayActive(true);
             drawCornerCanvas();
             updateCalibrationUi();
         }
@@ -329,6 +375,7 @@
 
             onLog(`Saved calibration keyframe F${keyframe.frame_index} / ${Number(keyframe.time_s || 0).toFixed(2)}s.`, 'success');
             onFeedback('success', `已保存标定 F${keyframe.frame_index} / ${Number(keyframe.time_s || 0).toFixed(2)}s`);
+            clearDraft();
             renderKeyframeList();
         }
 
@@ -353,6 +400,7 @@
                 onLog(`Calibration accepted (${calibrations.length} keyframe(s)). Starting frame-by-frame analysis...`, 'success');
                 onFeedback('success', 'Calibration accepted. Processing...');
                 if (cornerStep) cornerStep.classList.add('hidden');
+                clearDraft();
                 videoPlayer.hidden = false;
                 onProcessingStart({ videoId: pendingTrampolineVideoId, calibrationCount: calibrations.length, response: data });
             } catch (error) {
@@ -369,9 +417,6 @@
             videoPlayer.hidden = false;
             analysisCanvas.hidden = true;
             calibrationKeyframes = [];
-            cornerPoints = [];
-            activeKeyframeFrame = null;
-            activeKeyframeTimeS = 0;
             selectedCalibrationFrame = null;
             cornerContentRect = null;
             cornerImageSize = null;
@@ -379,9 +424,8 @@
             pendingTrampolineVideoId = videoId;
             uploadedFrameRate = Number(videoFps || videoPlayer.dataset.fps || uploadedFrameRate || 30) || 30;
             videoPlayer.dataset.fps = String(uploadedFrameRate);
-            if (cornerCount) cornerCount.textContent = '0/4';
+            clearDraft({ preserveSelection: false });
             renderKeyframeList();
-            setDraftImageFromDataUrl(imageSrc, 0, 0);
         }
 
         function reset() {
@@ -397,16 +441,13 @@
             pendingFrameImage = null;
             uploadedFrameRate = 30;
             if (cornerStep) cornerStep.classList.add('hidden');
-            if (cornerCanvas && cornerCtx) {
-                cornerCtx.clearRect(0, 0, cornerCanvas.width, cornerCanvas.height);
-            }
-            if (cornerCount) cornerCount.textContent = '0/4';
+            clearDraft({ preserveSelection: false });
             renderKeyframeList();
         }
 
         if (cornerCanvas) {
             cornerCanvas.addEventListener('click', (e) => {
-                if (!cornerImage || cornerPoints.length >= 4 || !geometry) return;
+                if (activeKeyframeFrame === null || cornerPoints.length >= 4 || !geometry) return;
                 updateCornerCanvasSize();
                 if (!cornerContentRect || !cornerImageSize) return;
                 const rect = cornerCanvas.getBoundingClientRect();
@@ -435,9 +476,16 @@
             deleteCalibration(selectedCalibrationFrame);
         });
         if (startTrampolineAnalysisBtn) startTrampolineAnalysisBtn.addEventListener('click', startTrampolineAnalysis);
+        if (videoPlayer) {
+            videoPlayer.addEventListener('loadedmetadata', () => {
+                if (cornerStep && !cornerStep.classList.contains('hidden') && activeKeyframeFrame !== null) {
+                    drawCornerCanvas();
+                }
+            });
+        }
         if (typeof window !== 'undefined') {
             window.addEventListener('resize', () => {
-                if (cornerStep && !cornerStep.classList.contains('hidden') && cornerImage) {
+                if (cornerStep && !cornerStep.classList.contains('hidden') && activeKeyframeFrame !== null) {
                     drawCornerCanvas();
                 }
             });
@@ -453,5 +501,6 @@
     return {
         createController,
         describeCalibrationUiState,
+        getCalibrationOverlayRequirement,
     };
 });

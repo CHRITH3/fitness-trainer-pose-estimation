@@ -23,22 +23,29 @@
 
 /* Main Layout */
 .main-content {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(560px, 1.35fr) minmax(520px, 1fr);
+    gap: 18px;
+    align-items: start;
 }
 
 .video-panel {
-    flex: 2;
-    min-width: 500px;
+    min-width: 0;
 }
 
 .analysis-panel {
-    flex: 1;
-    min-width: 320px;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(240px, 0.92fr) minmax(280px, 1.08fr);
+    gap: 12px;
+    align-items: start;
+}
+
+.analysis-column {
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 12px;
+    min-width: 0;
 }
 
 /* Video Container */
@@ -96,11 +103,19 @@
     object-fit: contain;
 }
 
+#video-player {
+    display: block;
+}
+
 #analysis-canvas {
     position: absolute;
-    top: 0;
-    left: 0;
     pointer-events: none;
+    z-index: 2;
+}
+
+.video-container.calibration-active #analysis-canvas {
+    pointer-events: auto;
+    cursor: crosshair;
 }
 
 /* Video Controls */
@@ -167,40 +182,32 @@
     padding-bottom: 5px;
 }
 
-/* Analysis Scope Summary */
-.analysis-info-mini {
-    margin-top: 10px;
-    padding: 10px;
-    background-color: #f8f9fa;
-    border-radius: 5px;
-    border-left: 3px solid #3498db;
-}
-
 /* Stats Grid */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
 }
 
 .stat-card {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border-radius: 8px;
-    padding: 15px;
+    padding: 12px 10px;
     text-align: center;
     color: white;
+    min-width: 0;
 }
 
 .stat-label {
     display: block;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     opacity: 0.9;
     margin-bottom: 5px;
 }
 
 .stat-value {
     display: block;
-    font-size: 1.8rem;
+    font-size: 1.55rem;
     font-weight: 700;
 }
 
@@ -208,55 +215,76 @@
     font-size: 1rem;
 }
 
-.stat-value.grade {
-    padding: 5px 15px;
-    border-radius: 5px;
-    background-color: rgba(255,255,255,0.2);
+.landing-card {
+    background: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%);
 }
 
-/* Gauge */
-.gauge-container {
+.landing-value {
+    font-size: 0.88rem;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.landing-map {
     position: relative;
-    width: 200px;
-    height: 120px;
-    margin: 0 auto;
+    min-height: 170px;
+    border-radius: 10px;
+    background: linear-gradient(145deg, #1a1a2e, #16213e);
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
 }
 
-.gauge {
-    width: 100%;
-    height: 100%;
-}
-
-.gauge-bg {
-    fill: none;
-    stroke: #e0e0e0;
-    stroke-width: 15;
-    stroke-linecap: round;
-}
-
-.gauge-fill {
-    fill: none;
-    stroke: #27ae60;
-    stroke-width: 15;
-    stroke-linecap: round;
-    stroke-dasharray: 251.2;
-    stroke-dashoffset: 251.2;
-    transition: stroke-dashoffset 0.5s, stroke 0.5s;
-}
-
-.gauge-value {
+.landing-map-bed {
     position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 2rem;
-    font-weight: 700;
-    color: #333;
+    inset: 18px 16px 30px;
+    border: 2px solid rgba(255,255,255,0.68);
+    border-radius: 6px;
+    background:
+        linear-gradient(90deg, transparent calc(50% - 1px), rgba(255,255,255,0.2) calc(50% - 1px), rgba(255,255,255,0.2) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(0deg, transparent calc(50% - 1px), rgba(255,255,255,0.2) calc(50% - 1px), rgba(255,255,255,0.2) calc(50% + 1px), transparent calc(50% + 1px));
 }
+
+.landing-map::after {
+    content: 'Landings';
+    position: absolute;
+    left: 16px;
+    bottom: 8px;
+    color: rgba(255,255,255,0.72);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+}
+
+.landing-dot {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    transform: translate(-50%, -50%);
+    border: 2px solid rgba(255,255,255,0.85);
+    background: #00e676;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.22);
+}
+
+.landing-dot.low { background: #ff5252; }
+.landing-dot.medium { background: #ffc107; }
+.landing-dot.latest { width: 14px; height: 14px; z-index: 2; }
+
+.landing-map-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.55);
+    font-size: 0.9rem;
+    pointer-events: none;
+}
+
+.landing-map.has-landings .landing-map-empty { display: none; }
 
 /* Feedback Log */
 .feedback-log {
-    max-height: 200px;
+    max-height: 92px;
     overflow-y: auto;
     border: 1px solid #eee;
     border-radius: 5px;
@@ -319,8 +347,30 @@
 .report-content {
     background-color: rgba(255,255,255,0.1);
     border-radius: 8px;
-    padding: 15px;
-    margin-bottom: 15px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.report-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.report-details-toggle {
+    width: 100%;
+    margin: 10px 0 6px;
+    background: rgba(255,255,255,0.16);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.35);
+}
+
+.report-details-toggle:hover {
+    background: rgba(255,255,255,0.25);
+}
+
+.report-details.hidden {
+    display: none;
 }
 
 .report-row {
@@ -353,21 +403,27 @@
 }
 
 /* Responsive */
-@media (max-width: 900px) {
-    .video-panel {
-        min-width: 100%;
-    }
-    
-    .analysis-panel {
-        min-width: 100%;
-    }
-    
-    .stats-grid {
-        grid-template-columns: repeat(4, 1fr);
+@media (min-width: 1201px) {
+    .container {
+        max-width: 1560px;
     }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 1180px) {
+    .main-content {
+        grid-template-columns: 1fr;
+    }
+
+    .analysis-panel {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .analysis-panel {
+        grid-template-columns: 1fr;
+    }
+
     .stats-grid {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -788,16 +844,6 @@
 
 .calibration-chip.complete {
     border-color: #27ae60;
-}
-
-#corner-canvas {
-    width: 100%;
-    height: auto;
-    max-height: 500px;
-    background: #111;
-    border-radius: 8px;
-    cursor: crosshair;
-    display: block;
 }
 
 .corner-status {

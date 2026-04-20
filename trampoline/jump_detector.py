@@ -41,6 +41,7 @@ class JumpDetector:
         # Frame tracking
         self._current_jump_start = 0
         self._flight_start = None
+        self._last_frame_idx = 0
 
         # Completed jumps list
         self.jumps = []
@@ -48,7 +49,19 @@ class JumpDetector:
         # Diagnostic log
         self._diagnostic_log = []
 
+    def current_flight_frames(self, frame_idx: int = None) -> int:
+        """Return live flight frame count without changing phase or event semantics."""
+        if self.phase != "flight" or self._flight_start is None:
+            return 0
+        current_frame = self._last_frame_idx if frame_idx is None else frame_idx
+        return max(0, int(current_frame) - int(self._flight_start))
+
+    def current_flight_duration_s(self, frame_idx: int = None) -> float:
+        """Return live flight duration in seconds for status/UI rendering."""
+        return self.current_flight_frames(frame_idx) / self.fps if self.fps else 0.0
+
     def process_frame(self, landmarks, frame_idx: int) -> dict:
+        self._last_frame_idx = frame_idx
         result = {
             "event": None,
             "phase": self.phase,
@@ -56,6 +69,8 @@ class JumpDetector:
             "velocity": 0.0,
             "ankle_y": 0.0,
             "jump_count": self.jump_count,
+            "current_flight_frames": self.current_flight_frames(frame_idx),
+            "current_flight_duration_s": self.current_flight_duration_s(frame_idx),
         }
 
         com_y = self._compute_com_y(landmarks)
@@ -114,6 +129,8 @@ class JumpDetector:
                         result["event"] = "landing"
                         self.jump_count += 1
                         result["jump_count"] = self.jump_count
+                        result["current_flight_frames"] = flight_duration
+                        result["current_flight_duration_s"] = flight_duration / self.fps if self.fps else 0.0
 
                         is_intermediate = flight_duration <= INTERMEDIATE_MAX_FLIGHT_FRAMES
                         self.jumps.append({
@@ -150,6 +167,15 @@ class JumpDetector:
                     self.phase = "flight"
                     result["phase"] = "flight"
                     self._flight_start = frame_idx
+                    result["current_flight_frames"] = 0
+                    result["current_flight_duration_s"] = 0.0
+
+        if self.phase == "flight" and result["event"] != "landing":
+            result["current_flight_frames"] = self.current_flight_frames(frame_idx)
+            result["current_flight_duration_s"] = self.current_flight_duration_s(frame_idx)
+        elif self.phase == "contact" and result["event"] != "landing":
+            result["current_flight_frames"] = 0
+            result["current_flight_duration_s"] = 0.0
 
         self._prev_prev_smoothed = self._prev_smoothed
         self._prev_smoothed = smoothed

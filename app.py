@@ -221,11 +221,26 @@ def _sync_analysis_from_results(analysis, results):
         'feedback': '',
         'current_action': '--',
         'completed_jumps': [],
+        'phase': 'unknown',
+        'current_flight_frames': 0,
+        'current_flight_duration_s': 0.0,
+        'latest_landing': None,
+        'landings': [],
     }
     for field, default in field_defaults.items():
         analysis[field] = results.get(field, default)
 
-    optional_fields = ('fps', 'total_frames', 'resolution')
+    optional_fields = (
+        'fps',
+        'video_fps',
+        'total_frames',
+        'resolution',
+        'phase',
+        'current_flight_frames',
+        'current_flight_duration_s',
+        'latest_landing',
+        'landings',
+    )
     for field in optional_fields:
         if field in results:
             analysis[field] = results[field]
@@ -323,6 +338,11 @@ def upload_video():
         'video_fps': float(fps or 30.0),
         'current_action': '--',
         'completed_jumps': [],
+        'phase': 'pending_calibration',
+        'current_flight_frames': 0,
+        'current_flight_duration_s': 0.0,
+        'latest_landing': None,
+        'landings': [],
         'corner_order': TRAMPOLINE_CORNER_ORDER,
         'corners': None,
         'started': False,
@@ -573,6 +593,13 @@ def get_video_status(video_id):
         'mode': 'trampoline',
         'current_action': analysis.get('current_action', '--'),
         'completed_jumps': analysis.get('completed_jumps', []),
+        'phase': analysis.get('phase', 'unknown'),
+        'current_flight_frames': analysis.get('current_flight_frames', 0),
+        'current_flight_duration_s': analysis.get('current_flight_duration_s', 0.0),
+        'latest_landing': analysis.get('latest_landing'),
+        'landings': analysis.get('landings', []),
+        'fps': analysis.get('fps'),
+        'video_fps': analysis.get('video_fps'),
     })
 
 

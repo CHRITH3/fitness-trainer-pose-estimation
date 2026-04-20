@@ -73,12 +73,16 @@ class TrampolineAnalyzer:
             "jump_count": self.jump_detector.jump_count,
             "current_action": self._current_action.value,
             "phase": detection["phase"],
+            "current_flight_frames": detection.get("current_flight_frames", 0),
+            "current_flight_duration_s": detection.get("current_flight_duration_s", 0.0),
             "velocity": detection["velocity"],
             "com_y": detection["com_y"],
             "ankle_y": detection["ankle_y"],
             "trunk_thigh_angle": self.action_classifier.trunk_thigh_angle,
             "thigh_shin_angle": self.action_classifier.thigh_shin_angle,
             "completed_jumps": self.completed_jumps,
+            "latest_landing": self._latest_landing(),
+            "landings": self._landings(),
         }
 
     def _compute_landing_payload(self, frame, landmarks):
@@ -119,8 +123,24 @@ class TrampolineAnalyzer:
             "feedback": "",
             "current_action": self._current_action.value,
             "completed_jumps": self.completed_jumps,
+            "phase": self.jump_detector.phase,
+            "current_flight_frames": self.jump_detector.current_flight_frames(),
+            "current_flight_duration_s": self.jump_detector.current_flight_duration_s(),
+            "latest_landing": self._latest_landing(),
+            "landings": self._landings(),
+            "fps": self.fps,
+            "video_fps": self.fps,
         }
 
     def dump_diagnostics(self, path: str):
         """Write jump detection diagnostics CSV."""
         self.jump_detector.dump_diagnostics(path)
+
+    def _landings(self):
+        """Return completed landing payloads in canonical jump order."""
+        return [jump.get("landing") for jump in self.completed_jumps if jump.get("landing")]
+
+    def _latest_landing(self):
+        """Return the most recent completed landing payload, if any."""
+        landings = self._landings()
+        return landings[-1] if landings else None
