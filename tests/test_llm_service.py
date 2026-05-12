@@ -145,17 +145,36 @@ class TestCache:
 
 
 class TestApiKeyResolution:
+    def test_prefers_deepseek_api_key(self, monkeypatch):
+        monkeypatch.setenv('DEEPSEEK_API_KEY', 'deepseek-key')
+        monkeypatch.setenv('DS_API_KEY', 'ds-key')
+        monkeypatch.setenv('QWEN_API_KEY', 'qwen-key')
+        monkeypatch.setenv('DASHSCOPE_API_KEY', 'dashscope-key')
+        assert resolve_api_key() == 'deepseek-key'
+
+    def test_falls_back_to_ds_api_key(self, monkeypatch):
+        monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+        monkeypatch.setenv('DS_API_KEY', 'ds-key')
+        monkeypatch.setenv('QWEN_API_KEY', 'qwen-key')
+        assert resolve_api_key() == 'ds-key'
+
     def test_prefers_qwen_api_key(self, monkeypatch):
+        monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+        monkeypatch.delenv('DS_API_KEY', raising=False)
         monkeypatch.setenv('QWEN_API_KEY', 'qwen-key')
         monkeypatch.setenv('DASHSCOPE_API_KEY', 'dashscope-key')
         assert resolve_api_key() == 'qwen-key'
 
     def test_falls_back_to_dashscope_api_key(self, monkeypatch):
+        monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+        monkeypatch.delenv('DS_API_KEY', raising=False)
         monkeypatch.delenv('QWEN_API_KEY', raising=False)
         monkeypatch.setenv('DASHSCOPE_API_KEY', 'dashscope-key')
         assert resolve_api_key() == 'dashscope-key'
 
     def test_returns_empty_string_when_no_key_present(self, monkeypatch):
+        monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+        monkeypatch.delenv('DS_API_KEY', raising=False)
         monkeypatch.delenv('QWEN_API_KEY', raising=False)
         monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
         assert resolve_api_key() == ''
@@ -163,22 +182,39 @@ class TestApiKeyResolution:
 
 class TestResolveModels:
     def test_defaults(self, monkeypatch):
+        monkeypatch.delenv('DEEPSEEK_FAST_MODEL', raising=False)
+        monkeypatch.delenv('DEEPSEEK_MODEL', raising=False)
+        monkeypatch.delenv('DS_FAST_MODEL', raising=False)
+        monkeypatch.delenv('DS_PRO_MODEL', raising=False)
         monkeypatch.delenv('QWEN_FAST_MODEL', raising=False)
         monkeypatch.delenv('QWEN_MODEL', raising=False)
         fast, quality = resolve_models()
-        assert fast == 'qwen-plus'
-        assert quality == 'qwen3.6-plus-2026-04-02'
+        assert fast == 'deepseek-v4-flash'
+        assert quality == 'deepseek-v4-pro'
 
     def test_custom_env(self, monkeypatch):
-        monkeypatch.setenv('QWEN_FAST_MODEL', 'custom-fast')
-        monkeypatch.setenv('QWEN_MODEL', 'custom-quality')
+        monkeypatch.setenv('DEEPSEEK_FAST_MODEL', 'custom-fast')
+        monkeypatch.setenv('DEEPSEEK_MODEL', 'custom-quality')
         fast, quality = resolve_models()
         assert fast == 'custom-fast'
         assert quality == 'custom-quality'
 
+    def test_falls_back_to_ds_then_qwen_model_env(self, monkeypatch):
+        monkeypatch.delenv('DEEPSEEK_FAST_MODEL', raising=False)
+        monkeypatch.delenv('DEEPSEEK_MODEL', raising=False)
+        monkeypatch.setenv('DS_FAST_MODEL', 'ds-fast')
+        monkeypatch.setenv('DS_PRO_MODEL', 'ds-pro')
+        monkeypatch.setenv('QWEN_FAST_MODEL', 'qwen-fast')
+        monkeypatch.setenv('QWEN_MODEL', 'qwen-pro')
+        fast, quality = resolve_models()
+        assert fast == 'ds-fast'
+        assert quality == 'ds-pro'
+
 
 class TestRunLlmAnalysisSync:
     def test_returns_error_without_api_key(self, monkeypatch, mock_analysis):
+        monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+        monkeypatch.delenv('DS_API_KEY', raising=False)
         monkeypatch.delenv('QWEN_API_KEY', raising=False)
         monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
         report = AnalysisReport.from_video_analysis(mock_analysis)

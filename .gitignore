@@ -27,3 +27,4 @@ output/
 data/*.db
 *.sqlite3
 /uploads
+.omx/

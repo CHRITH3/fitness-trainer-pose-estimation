@@ -642,7 +642,7 @@ def llm_analysis(video_id):
 
     api_key = resolve_api_key()
     if not api_key:
-        return sse_message({'type': 'error', 'message': 'QWEN_API_KEY or DASHSCOPE_API_KEY not configured'})
+        return sse_message({'type': 'error', 'message': 'LLM API key not configured'})
 
     cached = get_cached(video_id)
     if cached:

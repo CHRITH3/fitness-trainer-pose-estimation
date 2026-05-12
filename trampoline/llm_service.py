@@ -149,19 +149,49 @@ def build_prompt(report: AnalysisReport) -> list:
 
 # ── C. LLM Streaming Client ───────────────────────────────────────
 
+def _first_env(*names: str, default: str = "") -> str:
+    """Return the first non-empty environment variable value."""
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
 def resolve_api_key() -> str:
-    """Resolve the DashScope/Qwen API key from supported environment variables."""
-    return (
-        os.environ.get("QWEN_API_KEY")
-        or os.environ.get("DASHSCOPE_API_KEY")
-        or ""
+    """Resolve the LLM API key from supported environment variables."""
+    return _first_env(
+        "DEEPSEEK_API_KEY",
+        "DS_API_KEY",
+        "QWEN_API_KEY",
+        "DASHSCOPE_API_KEY",
+    )
+
+
+def resolve_base_url() -> str:
+    """Resolve the OpenAI-compatible base URL for the active provider."""
+    return _first_env(
+        "DEEPSEEK_BASE_URL",
+        "DS_BASE_URL",
+        "QWEN_BASE_URL",
+        default="https://api.deepseek.com",
     )
 
 
 def resolve_models() -> tuple:
     """Return (fast_model, quality_model) from environment."""
-    fast = os.environ.get("QWEN_FAST_MODEL", "qwen-plus")
-    quality = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
+    fast = _first_env(
+        "DEEPSEEK_FAST_MODEL",
+        "DS_FAST_MODEL",
+        "QWEN_FAST_MODEL",
+        default="deepseek-v4-flash",
+    )
+    quality = _first_env(
+        "DEEPSEEK_MODEL",
+        "DS_PRO_MODEL",
+        "QWEN_MODEL",
+        default="deepseek-v4-pro",
+    )
     return fast, quality
 
 
@@ -170,7 +200,7 @@ def stream_llm_analysis(report: AnalysisReport, model: str = None, timeout: floa
 
     Args:
         report: Structured analysis data.
-        model: Model name override. Defaults to QWEN_MODEL env var.
+        model: Model name override. Defaults to the configured quality model.
         timeout: API timeout in seconds.
     """
     try:
@@ -180,12 +210,12 @@ def stream_llm_analysis(report: AnalysisReport, model: str = None, timeout: floa
         return
 
     api_key = resolve_api_key()
-    base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    base_url = resolve_base_url()
     if model is None:
-        model = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
+        _, model = resolve_models()
 
     if not api_key:
-        yield "\n\n[ERROR] 未配置 QWEN_API_KEY 或 DASHSCOPE_API_KEY 环境变量"
+        yield "\n\n[ERROR] 未配置 LLM API key 环境变量（支持 DEEPSEEK_API_KEY / DS_API_KEY / QWEN_API_KEY / DASHSCOPE_API_KEY）"
         return
 
     messages = build_prompt(report)
@@ -212,9 +242,9 @@ def run_llm_analysis_sync(report: AnalysisReport, model: str = None, timeout: fl
         return "[ERROR] openai 库未安装"
 
     api_key = resolve_api_key()
-    base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    base_url = resolve_base_url()
     if model is None:
-        model = os.environ.get("QWEN_MODEL", "qwen3.6-plus-2026-04-02")
+        _, model = resolve_models()
 
     if not api_key:
         return "[ERROR] 未配置 API key"
