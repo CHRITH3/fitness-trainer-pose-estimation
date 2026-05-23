@@ -1,0 +1,232 @@
+{
+  "id": "2026-05-13-004503",
+  "generated_at": "2026-05-12T16:45:03.158440195Z",
+  "language": "zh",
+  "pages": [
+    {
+      "slug": "1-gai-lan",
+      "title": "概览",
+      "file": "1-gai-lan.md",
+      "section": "入门",
+      "level": "Beginner"
+    },
+    {
+      "slug": "2-kuai-su-kai-shi",
+      "title": "快速开始",
+      "file": "2-kuai-su-kai-shi.md",
+      "section": "入门",
+      "level": "Beginner"
+    },
+    {
+      "slug": "3-beng-chuang-shi-pin-fen-xi-zhu-liu-cheng",
+      "title": "蹦床视频分析主流程",
+      "file": "3-beng-chuang-shi-pin-fen-xi-zhu-liu-cheng.md",
+      "section": "入门",
+      "level": "Beginner"
+    },
+    {
+      "slug": "4-ye-mian-ru-kou-yu-gong-neng-bian-jie",
+      "title": "页面入口与功能边界",
+      "file": "4-ye-mian-ru-kou-yu-gong-neng-bian-jie.md",
+      "section": "入门",
+      "level": "Beginner"
+    },
+    {
+      "slug": "5-shang-chuan-biao-ding-fen-xi-yu-hui-fang-cao-zuo-zhi-nan",
+      "title": "上传、标定、分析与回放操作指南",
+      "file": "5-shang-chuan-biao-ding-fen-xi-yu-hui-fang-cao-zuo-zhi-nan.md",
+      "section": "入门",
+      "level": "Beginner"
+    },
+    {
+      "slug": "6-ai-jie-du-gong-neng-pei-zhi",
+      "title": "AI 解读功能配置",
+      "file": "6-ai-jie-du-gong-neng-pei-zhi.md",
+      "section": "入门",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "7-ce-shi-yu-yan-zheng-ming-ling-su-cha",
+      "title": "测试与验证命令速查",
+      "file": "7-ce-shi-yu-yan-zheng-ming-ling-su-cha.md",
+      "section": "入门",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "8-duan-dao-duan-jia-gou-yu-shu-ju-liu",
+      "title": "端到端架构与数据流",
+      "file": "8-duan-dao-duan-jia-gou-yu-shu-ju-liu.md",
+      "section": "深入解析",
+      "group": "系统架构",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "9-hou-duan-lu-you-zhuang-tai-ji-yu-ren-wu-sheng-ming-zhou-qi",
+      "title": "后端路由、状态机与任务生命周期",
+      "file": "9-hou-duan-lu-you-zhuang-tai-ji-yu-ren-wu-sheng-ming-zhou-qi.md",
+      "section": "深入解析",
+      "group": "系统架构",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "10-du-li-shi-pin-chu-li-jin-cheng-she-ji",
+      "title": "独立视频处理进程设计",
+      "file": "10-du-li-shi-pin-chu-li-jin-cheng-she-ji.md",
+      "section": "深入解析",
+      "group": "系统架构",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "11-qian-hou-duan-api-qi-yue",
+      "title": "前后端 API 契约",
+      "file": "11-qian-hou-duan-api-qi-yue.md",
+      "section": "深入解析",
+      "group": "系统架构",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "12-mediapipe-zi-tai-guan-jian-dian-chu-li-guan-xian",
+      "title": "MediaPipe 姿态关键点处理管线",
+      "file": "12-mediapipe-zi-tai-guan-jian-dian-chu-li-guan-xian.md",
+      "section": "深入解析",
+      "group": "蹦床分析核心算法",
+      "level": "Advanced"
+    },
+    {
+      "slug": "13-tiao-ci-fen-ge-yu-qi-tiao-luo-di-jian-ce",
+      "title": "跳次分割与起跳落地检测",
+      "file": "13-tiao-ci-fen-ge-yu-qi-tiao-luo-di-jian-ce.md",
+      "section": "深入解析",
+      "group": "蹦床分析核心算法",
+      "level": "Advanced"
+    },
+    {
+      "slug": "14-dong-zuo-fen-lei-zhi-ti-qu-ti-tuan-shen-yu-fen-tui-tiao",
+      "title": "动作分类：直体、屈体、团身与分腿跳",
+      "file": "14-dong-zuo-fen-lei-zhi-ti-qu-ti-tuan-shen-yu-fen-tui-tiao.md",
+      "section": "深入解析",
+      "group": "蹦床分析核心算法",
+      "level": "Advanced"
+    },
+    {
+      "slug": "15-zhong-duan-tou-piao-yu-zhi-hui-zhuang-tai-ji",
+      "title": "中段投票与滞回状态机",
+      "file": "15-zhong-duan-tou-piao-yu-zhi-hui-zhuang-tai-ji.md",
+      "section": "深入解析",
+      "group": "蹦床分析核心算法",
+      "level": "Advanced"
+    },
+    {
+      "slug": "16-si-jiao-biao-ding-yu-guan-jian-zheng-bu-biao",
+      "title": "四角标定与关键帧补标",
+      "file": "16-si-jiao-biao-ding-yu-guan-jian-zheng-bu-biao.md",
+      "section": "深入解析",
+      "group": "床面标定与落点分析",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "17-chuang-mian-gen-zong-zhi-xin-du-yu-piao-yi-xiu-zheng",
+      "title": "床面跟踪、置信度与漂移修正",
+      "file": "17-chuang-mian-gen-zong-zhi-xin-du-yu-piao-yi-xiu-zheng.md",
+      "section": "深入解析",
+      "group": "床面标定与落点分析",
+      "level": "Advanced"
+    },
+    {
+      "slug": "18-tu-xiang-zuo-biao-dao-chuang-mian-zuo-biao-de-ying-she",
+      "title": "图像坐标到床面坐标的映射",
+      "file": "18-tu-xiang-zuo-biao-dao-chuang-mian-zuo-biao-de-ying-she.md",
+      "section": "深入解析",
+      "group": "床面标定与落点分析",
+      "level": "Advanced"
+    },
+    {
+      "slug": "19-luo-dian-shu-ju-jie-gou-yu-ke-shi-hua",
+      "title": "落点数据结构与可视化",
+      "file": "19-luo-dian-shu-ju-jie-gou-yu-ke-shi-hua.md",
+      "section": "深入解析",
+      "group": "床面标定与落点分析",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "20-shi-pin-fen-xi-ye-mian-jiao-hu-mo-xing",
+      "title": "视频分析页面交互模型",
+      "file": "20-shi-pin-fen-xi-ye-mian-jiao-hu-mo-xing.md",
+      "section": "深入解析",
+      "group": "视频渲染与前端交互",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "21-biao-ding-hua-bu-ji-he-ji-suan",
+      "title": "标定画布几何计算",
+      "file": "21-biao-ding-hua-bu-ji-he-ji-suan.md",
+      "section": "深入解析",
+      "group": "视频渲染与前端交互",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "22-fen-xi-jin-du-lun-xun-yu-jie-guo-zhan-shi",
+      "title": "分析进度轮询与结果展示",
+      "file": "22-fen-xi-jin-du-lun-xun-yu-jie-guo-zhan-shi.md",
+      "section": "深入解析",
+      "group": "视频渲染与前端交互",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "23-fu-gai-ceng-hui-zhi-gu-jia-chuang-mian-su-du-yu-luo-dian",
+      "title": "覆盖层绘制：骨架、床面、速度与落点",
+      "file": "23-fu-gai-ceng-hui-zhi-gu-jia-chuang-mian-su-du-yu-luo-dian.md",
+      "section": "深入解析",
+      "group": "视频渲染与前端交互",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "24-jie-gou-hua-fen-xi-bao-gao-mo-xing",
+      "title": "结构化分析报告模型",
+      "file": "24-jie-gou-hua-fen-xi-bao-gao-mo-xing.md",
+      "section": "深入解析",
+      "group": "AI 分析层",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "25-ti-shi-ci-gou-jian-yu-shu-chu-yue-shu",
+      "title": "提示词构建与输出约束",
+      "file": "25-ti-shi-ci-gou-jian-yu-shu-chu-yue-shu.md",
+      "section": "深入解析",
+      "group": "AI 分析层",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "26-sse-liu-shi-fan-hui-huan-cun-yu-shuang-mo-xing-fen-xi",
+      "title": "SSE 流式返回、缓存与双模型分析",
+      "file": "26-sse-liu-shi-fan-hui-huan-cun-yu-shuang-mo-xing-fen-xi.md",
+      "section": "深入解析",
+      "group": "AI 分析层",
+      "level": "Advanced"
+    },
+    {
+      "slug": "27-ce-shi-ti-xi-yu-hui-gui-bao-hu",
+      "title": "测试体系与回归保护",
+      "file": "27-ce-shi-ti-xi-yu-hui-gui-bao-hu.md",
+      "section": "深入解析",
+      "group": "质量保障与扩展",
+      "level": "Intermediate"
+    },
+    {
+      "slug": "28-cuo-wu-chu-li-zi-yuan-qing-li-yu-shang-chuan-xian-zhi",
+      "title": "错误处理、资源清理与上传限制",
+      "file": "28-cuo-wu-chu-li-zi-yuan-qing-li-yu-shang-chuan-xian-zhi.md",
+      "section": "深入解析",
+      "group": "质量保障与扩展",
+      "level": "Advanced"
+    },
+    {
+      "slug": "29-xin-zeng-dong-zuo-lei-xing-huo-fen-xi-zhi-biao-de-kuo-zhan-lu-jing",
+      "title": "新增动作类型或分析指标的扩展路径",
+      "file": "29-xin-zeng-dong-zuo-lei-xing-huo-fen-xi-zhi-biao-de-kuo-zhan-lu-jing.md",
+      "section": "深入解析",
+      "group": "质量保障与扩展",
+      "level": "Advanced"
+    }
+  ]
+}
