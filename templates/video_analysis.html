@@ -3,46 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>蹦床视频分析</title>
+    <title>蹦床AI裁判系统 · 离线视频分析</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/video_analysis.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container" data-mode="trampoline">
-        <header>
-            <h1 id="page-title">蹦床视频分析</h1>
-            <p id="page-subtitle">上传蹦床视频后，可直接在暂停视频上标定床面四角、识别跳次、分析动作与落点。</p>
-            <nav class="nav-links">
-                <a href="/" class="nav-link">← 返回首页</a>
-                <a href="/dashboard" class="nav-link">仪表盘</a>
-                <a href="/profile" class="nav-link">训练档案</a>
+    <div class="app-shell" data-mode="trampoline" data-analysis-stage="upload">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-icon" aria-hidden="true">
+                    <span class="athlete-mark">⌁</span>
+                    <span class="bed-mark"></span>
+                </div>
+                <div>
+                    <h1 id="page-title">蹦床AI裁判系统 · 视频分析页面</h1>
+                    <p id="page-subtitle">视频上传 · 床面标定 · 动作分析 · AI 建议</p>
+                </div>
+            </div>
+
+            <nav class="mode-tabs" aria-label="页面切换">
+                <a class="mode-tab" href="/">实时裁判</a>
+                <a class="mode-tab active" href="/video_analysis" aria-current="page">离线视频分析</a>
             </nav>
+
+            <div class="header-tools">
+                <div class="status-chip" id="process-chip"><i class="dot amber"></i><span>等待上传</span></div>
+                <div class="status-chip muted"><i class="dot blue"></i><span>视频模式</span></div>
+                <a class="export-btn" href="/dashboard">训练看板</a>
+            </div>
         </header>
 
-        <div class="main-content">
-            <div class="video-panel">
+        <main class="dashboard-grid">
+            <section class="panel video-panel">
+                <div class="panel-head">
+                    <h2>离线视频画面</h2>
+                    <span class="head-tag" id="video-state-tag">等待上传</span>
+                </div>
+
                 <div class="video-container" id="video-container">
                     <div class="upload-area" id="upload-area">
-                        <div class="upload-icon">📁</div>
+                        <div class="upload-icon">▣</div>
                         <h3>拖拽视频到这里，或点击选择文件</h3>
                         <p>支持 MP4 / AVI / MOV / WebM</p>
                         <input type="file" id="video-input" accept="video/*" hidden>
-                        <button class="btn primary-btn" id="browse-btn">选择视频</button>
+                        <button class="btn primary-btn" id="browse-btn" type="button">选择视频</button>
                     </div>
                     <video id="video-player" controls hidden>
                         Your browser does not support the video tag.
                     </video>
                     <canvas id="analysis-canvas" hidden></canvas>
+                    <div class="frame-info" id="frame-info">
+                        <p>步骤：<strong>上传视频</strong></p>
+                        <p>完成后进入床面四角标定</p>
+                    </div>
+                </div>
+
+                <div class="video-controls">
+                    <div class="progress-container">
+                        <span id="progress-stage">等待上传蹦床视频</span>
+                        <div class="progress-bar" id="analysis-progress">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <span id="progress-text">0%</span>
+                    </div>
+                    <div class="control-buttons">
+                        <button class="btn" id="play-btn" disabled type="button">▶️ Play</button>
+                        <button class="btn primary-btn" id="analyze-btn" disabled type="button">🔍 上传并进入标定</button>
+                        <button class="btn" id="stop-analysis-btn" disabled type="button">⏹️ Stop</button>
+                        <button class="btn" id="reset-btn" disabled type="button">🔄 Reset</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel landing-panel">
+                <div class="panel-head">
+                    <h2>落点图</h2>
+                    <span class="soft-label">顶视图</span>
+                </div>
+                <div class="landing-map" id="landing-map" aria-label="蹦床落点图">
+                    <div class="landing-map-bed" id="landing-map-bed"></div>
+                    <div class="landing-map-empty" id="landing-map-empty">暂无落点</div>
+                </div>
+            </section>
+
+            <section class="panel score-panel">
+                <div class="panel-head">
+                    <h2>视觉评分预留</h2>
+                    <span class="soft-label">第一阶段占位</span>
+                </div>
+                <div class="score-cards">
+                    <div class="score-card"><span>难度分 D</span><strong id="score-d">--</strong><em>/10.0</em></div>
+                    <div class="score-card"><span>完成分 E</span><strong id="score-e">--</strong><em>/20.0</em></div>
+                    <div class="score-card"><span>腾空时间 T</span><strong id="score-t">--</strong><em>/20.0</em></div>
+                    <div class="score-card total"><span>综合得分</span><strong id="score-total">--</strong><em>/50.0</em></div>
+                </div>
+                <div class="deduction-box">
+                    <div class="deduction-title"><b>扣分与说明</b><span>视觉量化估计待接入</span></div>
+                    <ul class="deduction-list" id="deduction-list">
+                        <li class="empty">第一阶段不生成 D/E/T 假分数</li>
+                    </ul>
+                </div>
+            </section>
+
+            <section class="panel flight-panel">
+                <div class="panel-head">
+                    <h2>腾空时间曲线</h2>
+                    <span class="soft-label">(s)</span>
+                </div>
+                <svg id="flight-chart" viewBox="0 0 410 170" class="chart" role="img" aria-label="腾空时间曲线"></svg>
+            </section>
+
+            <section class="panel workflow-panel">
+                <div class="panel-head workflow-head">
+                    <h2 id="workflow-title">床面标定</h2>
+                    <div class="step-switch" role="tablist" aria-label="工作区切换">
+                        <button class="step-pill active" id="show-calibration" type="button" role="tab" aria-selected="true" aria-controls="corner-marking-step">标定交互</button>
+                        <button class="step-pill" id="show-results" type="button" role="tab" aria-selected="false" aria-controls="sequence-step">动作序列</button>
+                    </div>
                 </div>
 
                 <div class="corner-marking-step hidden" id="corner-marking-step">
-                    <h3>床面四角标定</h3>
-                    <p class="corner-instruction">在上方主视频暂停到目标帧，点击“添加当前帧标定”，然后直接在视频画面上按 <strong>前左 → 前右 → 后右 → 后左</strong> 标记 4 个床面角。</p>
+                    <div class="calibration-header-row">
+                        <div>
+                            <h3>床面四角标定</h3>
+                            <p class="corner-instruction">在上方主视频暂停到目标帧，点击“添加当前帧标定”，然后直接在视频画面上按 <strong>前左 → 前右 → 后右 → 后左</strong> 标记 4 个床面角。</p>
+                        </div>
+                        <div class="calibration-state-card">
+                            <span>标定状态</span>
+                            <b id="calibration-footer">待上传</b>
+                        </div>
+                    </div>
                     <div class="corner-toolbar">
                         <button class="btn" id="add-calibration-frame" type="button">➕ 添加当前帧标定</button>
                         <button class="btn" id="delete-calibration" type="button" disabled>🗑️ 删除所选标定</button>
                         <button class="btn primary-btn" id="start-trampoline-analysis" type="button" disabled>开始分析</button>
+                        <button class="btn" id="recalibrate-btn" type="button">重新标定</button>
                     </div>
                     <div class="calibration-meta">
                         <span id="calibration-draft-label">当前草稿：未选择</span>
@@ -57,114 +152,121 @@
                     <div class="keyframe-list" id="keyframe-list"></div>
                 </div>
 
-                <div class="video-controls">
-                    <div class="progress-container">
-                        <div class="progress-bar" id="analysis-progress">
-                            <div class="progress-fill" id="progress-fill"></div>
-                        </div>
-                        <span id="progress-text">0%</span>
+                <div class="sequence-step hidden" id="sequence-step">
+                    <div class="sequence-toolbar">
+                        <span>分析完成，共识别 <b id="sequence-jump-count">0</b> 次有效跳跃</span>
+                        <span class="sequence-status" id="sequence-duration">处理耗时：--</span>
                     </div>
-                    <div class="control-buttons">
-                        <button class="btn" id="play-btn" disabled>▶️ Play</button>
-                        <button class="btn" id="analyze-btn" disabled>🔍 上传并进入标定</button>
-                        <button class="btn" id="stop-analysis-btn" disabled>⏹️ Stop</button>
-                        <button class="btn" id="reset-btn" disabled>🔄 Reset</button>
+                    <div class="sequence-summary" id="sequence-summary">
+                        <div><span>总跳次</span><b id="sequence-total">0</b></div>
+                        <div><span>过渡跳</span><b id="sequence-transition">0</b></div>
+                        <div class="wide"><span>动作分布</span><b id="sequence-action-breakdown">--</b></div>
                     </div>
-                </div>
-            </div>
-
-            <div class="analysis-panel">
-                <div class="analysis-column analysis-column-live">
-                    <div class="section stats-section">
-                        <h2>实时统计</h2>
-                        <div class="stats-grid">
-                            <div class="stat-card">
-                                <span class="stat-label" id="count-label">跳次</span>
-                                <span class="stat-value" id="stat-reps">0</span>
-                            </div>
-                            <div class="stat-card">
-                                <span class="stat-label">当前跳滞空时间</span>
-                                <span class="stat-value" id="stat-flight-time">--</span>
-                            </div>
-                            <div class="stat-card action-card" id="action-card">
-                                <span class="stat-label">动作</span>
-                                <span class="stat-value action-name" id="stat-action">--</span>
-                            </div>
-                            <div class="stat-card landing-card">
-                                <span class="stat-label">落点坐标 + conf</span>
-                                <span class="stat-value landing-value" id="stat-landing">--</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="section landing-map-section">
-                        <h2>落点图</h2>
-                        <div class="landing-map" id="landing-map" aria-label="蹦床落点图">
-                            <div class="landing-map-bed" id="landing-map-bed"></div>
-                            <div class="landing-map-empty" id="landing-map-empty">暂无落点</div>
-                        </div>
+                    <div class="table-shell">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>跳次</th>
+                                    <th>动作</th>
+                                    <th>腾空</th>
+                                    <th>落点</th>
+                                    <th>置信度</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="jump-table-body">
+                                <tr><td colspan="6">完成分析后显示动作序列</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
+            </section>
 
-                <div class="analysis-column analysis-column-report">
-                    <div class="section report-section hidden" id="report-section">
-                        <h2>分析报告</h2>
-                        <div class="report-content" id="report-content"></div>
-                        <button class="btn primary-btn" id="download-report-btn">下载报告</button>
-                    </div>
-
-                    <div class="section llm-section hidden" id="llm-section">
+            <section class="panel ai-panel">
+                <div class="section llm-section" id="llm-section">
+                    <div class="ai-head-row">
                         <h2>AI 分析</h2>
-                        <button class="btn primary-btn" id="llm-btn" disabled>开始 AI 分析</button>
-
-                        <div class="llm-streaming hidden" id="llm-streaming">
-                            <div class="llm-streaming-header">
-                                <span class="llm-status-dot"></span>
-                                <span>正在分析...</span>
-                            </div>
-                            <div class="llm-streaming-text" id="llm-streaming-text"></div>
-                        </div>
-
-                        <div class="llm-cards hidden" id="llm-cards">
-                            <div class="llm-card" id="llm-card-overview">
-                                <h3>整体表现</h3>
-                                <div class="llm-card-body"></div>
-                            </div>
-                            <div class="llm-card" id="llm-card-issues">
-                                <h3>主要问题</h3>
-                                <div class="llm-card-body"></div>
-                            </div>
-                            <div class="llm-card" id="llm-card-details">
-                                <h3>逐跳点评</h3>
-                                <div class="llm-card-body"></div>
-                            </div>
-                            <div class="llm-card" id="llm-card-suggestions">
-                                <h3>改进建议</h3>
-                                <div class="llm-card-body"></div>
-                            </div>
-                        </div>
-                        <button class="btn llm-toggle-raw hidden" id="llm-toggle-raw">展开原文</button>
+                        <button class="btn primary-btn" id="llm-btn" disabled type="button">开始 AI 分析</button>
                     </div>
 
-                    <div class="section feedback-section">
-                        <h2>过程反馈</h2>
-                        <div class="feedback-log" id="feedback-log">
-                            <div class="feedback-item info">
-                                <span class="feedback-time">--:--</span>
-                                <span class="feedback-text">上传蹦床视频并开始分析后，这里会显示过程反馈。</span>
-                            </div>
+                    <div class="llm-streaming hidden" id="llm-streaming">
+                        <div class="llm-streaming-header">
+                            <span class="llm-status-dot"></span>
+                            <span>正在分析...</span>
+                        </div>
+                        <div class="llm-streaming-text" id="llm-streaming-text"></div>
+                    </div>
+
+                    <div class="llm-cards hidden" id="llm-cards">
+                        <div class="llm-tabs" role="tablist" aria-label="AI 分析分段">
+                            <button class="llm-tab active" id="llm-tab-overview" type="button" data-llm-section="整体表现" role="tab" aria-selected="true">整体表现</button>
+                            <button class="llm-tab" id="llm-tab-issues" type="button" data-llm-section="主要问题" role="tab" aria-selected="false">主要问题</button>
+                            <button class="llm-tab" id="llm-tab-details" type="button" data-llm-section="逐跳点评" role="tab" aria-selected="false">逐跳点评</button>
+                            <button class="llm-tab" id="llm-tab-suggestions" type="button" data-llm-section="改进建议" role="tab" aria-selected="false">改进建议</button>
+                        </div>
+                        <div class="llm-active-panel" id="llm-active-panel" role="tabpanel"></div>
+                        <div class="llm-card hidden" id="llm-card-overview">
+                            <h3>整体表现</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                        <div class="llm-card hidden" id="llm-card-issues">
+                            <h3>主要问题</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                        <div class="llm-card hidden" id="llm-card-details">
+                            <h3>逐跳点评</h3>
+                            <div class="llm-card-body"></div>
+                        </div>
+                        <div class="llm-card hidden" id="llm-card-suggestions">
+                            <h3>改进建议</h3>
+                            <div class="llm-card-body"></div>
                         </div>
                     </div>
+                    <button class="btn llm-toggle-raw hidden" id="llm-toggle-raw" type="button">展开原文</button>
+                    <button class="btn" id="download-report-btn" type="button">下载报告</button>
+                </div>
+
+                <div class="ai-waiting" id="ai-waiting">
+                    <div class="empty-icon">✦</div>
+                    <h3>等待分析结果</h3>
+                    <p>完成床面标定并开始分析后，在这里显示整体表现、主要问题、逐跳点评和训练建议。</p>
+                </div>
+            </section>
+        </main>
+
+        <div class="compatibility-nodes hidden" aria-hidden="true">
+            <div id="count-label">跳次</div>
+            <div id="stat-reps">0</div>
+            <div id="stat-flight-time">--</div>
+            <div id="action-card"></div>
+            <div id="stat-action">--</div>
+            <div id="stat-landing">--</div>
+            <div class="report-section hidden" id="report-section">
+                <div id="report-content"></div>
+            </div>
+            <div class="feedback-log" id="feedback-log">
+                <div class="feedback-item info">
+                    <span class="feedback-time">--:--</span>
+                    <span class="feedback-text">上传蹦床视频并开始分析后，这里会记录后台消息。</span>
                 </div>
             </div>
         </div>
+
+        <footer class="bottom-bar">
+            <div class="session-meta">
+                <span>分析类型：<b>离线视频</b></span>
+                <span>视频文件：<b id="filename">未选择</b></span>
+                <span>标定状态：<b id="calibration-footer-bottom">待上传</b></span>
+                <span>已识别跳次：<b class="emphasis" id="jump-count">0</b></span>
+            </div>
+        </footer>
 
         <div class="terminal-section" id="terminal-section">
             <div class="terminal-header">
                 <span class="terminal-title">处理日志</span>
                 <div class="terminal-controls">
                     <span class="terminal-status" id="terminal-status">● Idle</span>
-                    <button class="terminal-toggle" id="terminal-toggle">▼</button>
+                    <button class="terminal-toggle" id="terminal-toggle" type="button">▼</button>
                 </div>
             </div>
             <div class="terminal-body" id="terminal-body">

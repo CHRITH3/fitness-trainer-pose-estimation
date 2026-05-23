@@ -7,6 +7,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const videoPlayer = document.getElementById('video-player');
     const analysisCanvas = document.getElementById('analysis-canvas');
     const ctx = analysisCanvas.getContext('2d');
+    const appShell = document.querySelector('.app-shell');
+    const processChip = document.getElementById('process-chip');
+    const videoStateTag = document.getElementById('video-state-tag');
+    const progressStage = document.getElementById('progress-stage');
+    const frameInfo = document.getElementById('frame-info');
+    const filenameEl = document.getElementById('filename');
+    const calibrationFooter = document.getElementById('calibration-footer');
+    const calibrationFooterBottom = document.getElementById('calibration-footer-bottom');
+    const jumpCount = document.getElementById('jump-count');
 
     const playBtn = document.getElementById('play-btn');
     const analyzeBtn = document.getElementById('analyze-btn');
@@ -21,6 +30,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const statLanding = document.getElementById('stat-landing');
     const landingMap = document.getElementById('landing-map');
     const landingMapBed = document.getElementById('landing-map-bed');
+    const flightChart = document.getElementById('flight-chart');
     const feedbackLog = document.getElementById('feedback-log');
     const reportSection = document.getElementById('report-section');
     const reportContent = document.getElementById('report-content');
@@ -37,6 +47,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const llmStreamingText = document.getElementById('llm-streaming-text');
     const llmCards = document.getElementById('llm-cards');
     const llmToggleRaw = document.getElementById('llm-toggle-raw');
+    const llmTabs = Array.from(document.querySelectorAll('.llm-tab'));
+    const llmActivePanel = document.getElementById('llm-active-panel');
+    const aiWaiting = document.getElementById('ai-waiting');
+    const sequenceStep = document.getElementById('sequence-step');
+    const sequenceJumpCount = document.getElementById('sequence-jump-count');
+    const sequenceTotal = document.getElementById('sequence-total');
+    const sequenceTransition = document.getElementById('sequence-transition');
+    const sequenceActionBreakdown = document.getElementById('sequence-action-breakdown');
+    const sequenceDuration = document.getElementById('sequence-duration');
+    const jumpTableBody = document.getElementById('jump-table-body');
+    const recalibrateBtn = document.getElementById('recalibrate-btn');
+    const showCalibrationBtn = document.getElementById('show-calibration');
+    const showResultsBtn = document.getElementById('show-results');
+    const scoreIds = ['score-d', 'score-e', 'score-t', 'score-total', 'deduction-total'];
+    const deductionList = document.getElementById('deduction-list');
 
     const calibrationGeometry = window.TrampolineCalibrationGeometry;
     const trampolineCalibrationUi = window.TrampolineCalibrationUI;
@@ -60,6 +85,13 @@ document.addEventListener('DOMContentLoaded', function() {
         startTime: null,
         endTime: null,
         completedJumps: [],
+        durationSeconds: 0,
+        actionBreakdown: '—',
+        transitionCount: 0,
+        llmSections: {},
+        llmFullText: '',
+        llmSource: '',
+        activeLlmSection: '整体表现',
     };
 
     function getTimestamp() {
@@ -98,6 +130,127 @@ document.addEventListener('DOMContentLoaded', function() {
         analysisResults.feedbacks.push({ time: timeStr, type, message });
     }
 
+    function setText(node, text) {
+        if (node) node.textContent = text;
+    }
+
+    function setProcessState(kind, text) {
+        if (!processChip) return;
+        const color = {
+            idle: 'amber',
+            ready: 'blue',
+            processing: 'blue',
+            success: 'green',
+            error: 'red',
+        }[kind] || 'amber';
+        processChip.innerHTML = `<i class="dot ${color}"></i><span>${text}</span>`;
+    }
+
+    function setStage(stageName, label, detailHtml) {
+        if (appShell) appShell.dataset.analysisStage = stageName;
+        setText(videoStateTag, label);
+        setText(progressStage, label);
+        if (detailHtml && frameInfo) frameInfo.innerHTML = detailHtml;
+    }
+
+    function setCalibrationStatus(text) {
+        setText(calibrationFooter, text);
+        setText(calibrationFooterBottom, text);
+    }
+
+    function clearScorePlaceholders() {
+        scoreIds.forEach(id => setText(document.getElementById(id), '--'));
+        if (deductionList) {
+            deductionList.innerHTML = '<li class="empty">第一阶段不生成 D/E/T 假分数</li>';
+        }
+    }
+
+    function setWorkflowTab(tab) {
+        const showCalibration = tab === 'calibration';
+        if (showCalibrationBtn) {
+            showCalibrationBtn.classList.toggle('active', showCalibration);
+            showCalibrationBtn.setAttribute('aria-selected', String(showCalibration));
+        }
+        if (showResultsBtn) {
+            showResultsBtn.classList.toggle('active', !showCalibration);
+            showResultsBtn.setAttribute('aria-selected', String(!showCalibration));
+        }
+        if (sequenceStep) sequenceStep.classList.toggle('hidden', showCalibration);
+        const cornerStep = document.getElementById('corner-marking-step');
+        if (cornerStep && (currentVideoId || analysisResults.completedJumps.length)) {
+            cornerStep.classList.toggle('hidden', !showCalibration);
+        }
+        setText(document.getElementById('workflow-title'), showCalibration ? '床面标定' : '动作序列');
+    }
+
+    function summarizeJumps(jumps) {
+        const allJumps = Array.isArray(jumps) ? jumps : [];
+        const realJumps = allJumps.filter(j => j && !j.is_intermediate);
+        const actionCounts = {};
+        realJumps.forEach(j => {
+            const action = j.action || '--';
+            actionCounts[action] = (actionCounts[action] || 0) + 1;
+        });
+        return {
+            realJumps,
+            transitionCount: allJumps.filter(j => j && j.is_intermediate).length,
+            actionBreakdown: Object.entries(actionCounts).map(([k, v]) => `${k}: ${v}`).join('，') || '—',
+        };
+    }
+
+    function formatJumpLanding(jump) {
+        const landing = validLanding(jump?.landing);
+        if (!landing) return { coord: '--', confidence: '--' };
+        const xy = Array.isArray(landing.bed_xy_m) ? landing.bed_xy_m : null;
+        const coord = xy && finiteNumber(xy[0]) !== null && finiteNumber(xy[1]) !== null
+            ? `(${formatFixed(xy[0])}, ${formatFixed(xy[1])})m`
+            : landing.zone || '--';
+        const conf = finiteNumber(landing.confidence);
+        return {
+            coord,
+            confidence: conf === null ? '--' : conf.toFixed(2),
+        };
+    }
+
+    function renderJumpSequence(data = {}) {
+        if (!sequenceStep || !jumpTableBody) return;
+        const jumps = data.completed_jumps || analysisResults.completedJumps || [];
+        const { realJumps, transitionCount, actionBreakdown } = summarizeJumps(jumps);
+        const duration = analysisResults.durationSeconds || 0;
+        analysisResults.actionBreakdown = actionBreakdown;
+        analysisResults.transitionCount = transitionCount;
+        setText(sequenceJumpCount, String(realJumps.length));
+        setText(sequenceTotal, String(data.reps || realJumps.length || 0));
+        setText(sequenceTransition, String(transitionCount));
+        setText(sequenceActionBreakdown, actionBreakdown);
+        setText(sequenceDuration, `处理耗时：${duration ? `${duration}s` : '--'}`);
+        setText(jumpCount, String(data.reps || realJumps.length || 0));
+
+        if (!realJumps.length) {
+            jumpTableBody.innerHTML = '<tr><td colspan="6">完成分析后显示动作序列</td></tr>';
+            return;
+        }
+
+        jumpTableBody.innerHTML = realJumps.map((jump, index) => {
+            const landing = formatJumpLanding(jump);
+            const flight = finiteNumber(jump.flight_duration_s);
+            const flightText = flight === null
+                ? (finiteNumber(jump.flight_frames) === null ? '--' : `${jump.flight_frames} 帧`)
+                : `${flight.toFixed(2)}s`;
+            return `
+                <tr>
+                    <td>${jump.jump_number || index + 1}</td>
+                    <td>${jump.action || '--'}</td>
+                    <td>${flightText}</td>
+                    <td>${landing.coord}</td>
+                    <td>${landing.confidence}</td>
+                    <td>${jump.is_intermediate ? '过渡' : '有效'}</td>
+                </tr>
+            `;
+        }).join('');
+        sequenceStep.classList.remove('hidden');
+    }
+
     function resetStats() {
         statReps.textContent = '0';
         statFlightTime.textContent = '--';
@@ -107,6 +260,16 @@ document.addEventListener('DOMContentLoaded', function() {
         renderLandingMap([]);
         progressFill.style.width = '0%';
         progressText.textContent = '0%';
+        setText(jumpCount, '0');
+        setText(sequenceJumpCount, '0');
+        setText(sequenceTotal, '0');
+        setText(sequenceTransition, '0');
+        setText(sequenceActionBreakdown, '--');
+        setText(sequenceDuration, '处理耗时：--');
+        if (sequenceStep) sequenceStep.classList.add('hidden');
+        if (jumpTableBody) jumpTableBody.innerHTML = '<tr><td colspan="6">完成分析后显示动作序列</td></tr>';
+        clearScorePlaceholders();
+        renderFlightChart({});
     }
 
     function stopAnalysis() {
@@ -126,6 +289,125 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/^## (.+)$/gm, '<div style="font-weight:700;color:#00d4aa;margin:8px 0 4px">$1</div>')
             .replace(/\n/g, '<br>');
+    }
+
+    const llmSectionOrder = ['整体表现', '主要问题', '逐跳点评', '改进建议'];
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function findJumpAction(jumpNumber, fallbackText = '') {
+        const jumps = analysisResults.completedJumps || [];
+        const numeric = Number(jumpNumber);
+        const jump = jumps.find(item => Number(item?.jump_number) === numeric)
+            || jumps.filter(item => item && !item.is_intermediate)[numeric - 1];
+        if (jump?.action) return jump.action;
+        const match = String(fallbackText).match(/第\s*\d+\s*跳[：:\s，,]*(.+?)(?:[，,。；;（(]|\n|$)/);
+        return match ? match[1].trim() : '--';
+    }
+
+    function parseJumpDetailItems(text) {
+        const source = String(text || '').trim();
+        if (!source) return [];
+        const matches = [...source.matchAll(/第\s*(\d+)\s*跳/g)];
+        if (!matches.length) return [];
+        return matches.map((match, idx) => {
+            const start = match.index || 0;
+            const end = idx + 1 < matches.length ? matches[idx + 1].index : source.length;
+            const detail = source.slice(start, end).trim();
+            return {
+                jumpNumber: Number(match[1]),
+                action: findJumpAction(match[1], detail),
+                detail,
+            };
+        });
+    }
+
+    function renderJumpDetailPanel(text) {
+        const items = parseJumpDetailItems(text);
+        if (!items.length) {
+            return simpleMd(text || 'AI 未生成此部分');
+        }
+        return `<div class="llm-jump-list">${items.map(item => `
+            <div class="llm-jump-item" tabindex="0">
+                <span class="llm-jump-index">第 ${item.jumpNumber} 跳</span>
+                <span class="llm-jump-action">${escapeHtml(item.action)}</span>
+                <div class="llm-jump-detail-popover">${simpleMd(item.detail)}</div>
+            </div>
+        `).join('')}</div>`;
+    }
+
+    function renderLlmSection(sectionName = analysisResults.activeLlmSection || '整体表现') {
+        analysisResults.activeLlmSection = sectionName;
+        llmTabs.forEach(tab => {
+            const active = tab.dataset.llmSection === sectionName;
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', String(active));
+        });
+        if (!llmActivePanel) return;
+        const content = (analysisResults.llmSections && analysisResults.llmSections[sectionName]) || '';
+        llmActivePanel.innerHTML = sectionName === '逐跳点评'
+            ? renderJumpDetailPanel(content)
+            : (content ? simpleMd(content) : '<span style="color:#999">AI 未生成此部分</span>');
+    }
+
+    function setLlmSections(sections = {}, fullText = '', source = '') {
+        analysisResults.llmSections = {};
+        llmSectionOrder.forEach(name => {
+            analysisResults.llmSections[name] = sections[name] || '';
+        });
+        analysisResults.llmFullText = fullText || '';
+        analysisResults.llmSource = source || '';
+
+        const sectionMap = {
+            '整体表现': 'llm-card-overview',
+            '主要问题': 'llm-card-issues',
+            '逐跳点评': 'llm-card-details',
+            '改进建议': 'llm-card-suggestions',
+        };
+        for (const [heading, cardId] of Object.entries(sectionMap)) {
+            const card = document.getElementById(cardId);
+            if (!card) continue;
+            const body = card.querySelector('.llm-card-body');
+            const content = analysisResults.llmSections[heading] || '';
+            if (body) body.innerHTML = content ? simpleMd(content) : '<span style="color:#999">AI 未生成此部分</span>';
+        }
+        renderLlmSection('整体表现');
+    }
+
+    function resetLlmResults() {
+        analysisResults.llmSections = {};
+        analysisResults.llmFullText = '';
+        analysisResults.llmSource = '';
+        analysisResults.activeLlmSection = '整体表现';
+        if (llmActivePanel) llmActivePanel.innerHTML = '';
+        llmTabs.forEach(tab => {
+            const active = tab.dataset.llmSection === '整体表现';
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', String(active));
+        });
+    }
+
+    function formatAiReportText() {
+        const hasSections = analysisResults.llmSections
+            && llmSectionOrder.some(name => (analysisResults.llmSections[name] || '').trim());
+        if (!hasSections && !analysisResults.llmFullText) {
+            return 'AI 分析：尚未生成';
+        }
+        const sectionText = llmSectionOrder.map(name => {
+            const content = (analysisResults.llmSections[name] || '').trim() || '未生成';
+            return `${name}\n${content}`;
+        }).join('\n\n');
+        const fullText = analysisResults.llmFullText
+            ? `\n\nAI 原文\n${analysisResults.llmFullText}`
+            : '';
+        return `${sectionText}${fullText}`;
     }
 
     const { finiteNumber, validLanding, resolveCompactStats } = videoAnalysisHelpers;
@@ -176,77 +458,100 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function showTrampolineReport(data) {
+    function resolveFlightSeconds(jump, fps) {
+        const explicit = finiteNumber(jump?.flight_duration_s);
+        if (explicit !== null) return explicit;
+        const frames = finiteNumber(jump?.flight_frames);
+        const rate = finiteNumber(fps);
+        if (frames !== null && rate !== null && rate > 0) {
+            return frames / rate;
+        }
+        return null;
+    }
+
+    function renderFlightChart(data = {}) {
+        if (!flightChart) return;
+        const fps = data.fps || data.video_fps || videoPlayer.dataset.fps || 30;
+        const allJumps = Array.isArray(data.completed_jumps)
+            ? data.completed_jumps
+            : analysisResults.completedJumps;
+        const values = (Array.isArray(allJumps) ? allJumps : [])
+            .filter(jump => jump && !jump.is_intermediate)
+            .map(jump => resolveFlightSeconds(jump, fps))
+            .filter(value => value !== null);
+
+        const current = finiteNumber(data.current_flight_duration_s);
+        if (current !== null && current > 0 && values.length < 10) {
+            values.push(current);
+        }
+
+        const visible = values.slice(-10);
+        const w = 410;
+        const h = 170;
+        const left = 35;
+        const right = 12;
+        const top = 14;
+        const bottom = 35;
+        const chartWidth = w - left - right;
+        const chartHeight = h - top - bottom;
+        const maxValue = Math.max(2, ...visible.map(v => Math.ceil(v * 10) / 10));
+        const x = i => left + (chartWidth / 9) * i;
+        const y = value => top + chartHeight - (Math.max(0, Math.min(maxValue, value)) / maxValue) * chartHeight;
+
+        let output = '';
+        for (let i = 0; i <= 4; i++) {
+            const yy = top + (chartHeight / 4) * i;
+            const label = (maxValue - (maxValue / 4) * i).toFixed(1);
+            output += `<line class="chart-grid" x1="${left}" y1="${yy}" x2="${w - right}" y2="${yy}"></line>`;
+            output += `<text class="chart-label" x="4" y="${yy + 4}">${label}</text>`;
+        }
+        output += `<line class="chart-axis" x1="${left}" y1="${top}" x2="${left}" y2="${h - bottom}"></line>`;
+        output += `<line class="chart-axis" x1="${left}" y1="${h - bottom}" x2="${w - right}" y2="${h - bottom}"></line>`;
+
+        if (visible.length) {
+            const points = visible.map((value, i) => ({ x: x(i), y: y(value), value }));
+            output += `<path class="chart-line" d="${points.map((point, i) => `${i ? 'L' : 'M'}${point.x} ${point.y}`).join(' ')}"></path>`;
+            points.forEach((point, i) => {
+                output += `<circle class="chart-dot" cx="${point.x}" cy="${point.y}" r="4"></circle>`;
+                output += `<text class="chart-value" x="${point.x - 11}" y="${point.y - 9}">${point.value.toFixed(2)}</text>`;
+                output += `<text class="chart-label" x="${point.x - 3}" y="${h - 16}">${i + 1}</text>`;
+            });
+        } else {
+            for (let i = 0; i < 10; i++) {
+                output += `<circle class="chart-placeholder" cx="${x(i)}" cy="${y(maxValue * 0.55)}" r="3"></circle>`;
+                output += `<text class="chart-label" x="${x(i) - 3}" y="${h - 16}">${i + 1}</text>`;
+            }
+        }
+
+        output += `<text class="chart-label" x="${left}" y="${h - 3}">跳次</text>`;
+        output += `<text class="chart-label" x="${w / 2 - 24}" y="${h - 3}">— 腾空时间</text>`;
+        flightChart.innerHTML = output;
+    }
+
+    function showAnalysisSummary(data) {
         const jumps = data.completed_jumps || analysisResults.completedJumps || [];
-        const realJumps = jumps.filter(j => !j.is_intermediate);
-        const jumpCount = data.reps || realJumps.length;
-        const duration = analysisResults.endTime && analysisResults.startTime
+        analysisResults.durationSeconds = analysisResults.endTime && analysisResults.startTime
             ? Math.round((analysisResults.endTime - analysisResults.startTime) / 1000)
             : 0;
-
-        const actionCounts = {};
-        realJumps.forEach(j => {
-            actionCounts[j.action] = (actionCounts[j.action] || 0) + 1;
-        });
-        const actionBreakdown = Object.entries(actionCounts)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('，') || '—';
-
-        function fmtNum(value, digits = 2) {
-            const n = Number(value);
-            return Number.isFinite(n) ? n.toFixed(digits) : String(value ?? '?');
+        const summary = summarizeJumps(jumps);
+        analysisResults.actionBreakdown = summary.actionBreakdown;
+        analysisResults.transitionCount = summary.transitionCount;
+        if (reportContent) {
+            reportContent.textContent = '';
         }
-
-        let jumpDetails = '';
-        realJumps.forEach((jump, i) => {
-            const landing = jump.landing;
-            let landingText = '落点：--';
-            if (landing) {
-                const xy = landing.bed_xy_m || ['?', '?'];
-                const conf = landing.confidence !== undefined ? Number(landing.confidence).toFixed(2) : '--';
-                const low = landing.confidence !== undefined && Number(landing.confidence) < 0.5;
-                landingText = `落点：(${fmtNum(xy[0])}, ${fmtNum(xy[1])})m / ${landing.zone || '--'} / conf ${conf}${low ? ' <span class="landing-low-confidence">低置信</span>' : ''}`;
-            }
-            jumpDetails += `
-                <div class="report-row">
-                    <span class="report-label">第 ${jump.jump_number || (i + 1)} 跳</span>
-                    <span class="report-value">${jump.action} <span class="jump-flight-info">(${jump.flight_frames} 帧)</span><br><small>${landingText}</small></span>
-                </div>`;
-        });
-
-        const intermediateCount = jumps.filter(j => j.is_intermediate).length;
-        const detailsId = 'report-jump-details';
-
-        reportContent.innerHTML = `
-            <div class="report-summary">
-                <div class="report-row"><span class="report-label">分析类型</span><span class="report-value">蹦床</span></div>
-                <div class="report-row"><span class="report-label">总跳次</span><span class="report-value">${jumpCount}</span></div>
-                ${intermediateCount > 0 ? `<div class="report-row"><span class="report-label">中间过渡跳</span><span class="report-value">${intermediateCount}</span></div>` : ''}
-                <div class="report-row"><span class="report-label">动作分布</span><span class="report-value">${actionBreakdown}</span></div>
-                <div class="report-row"><span class="report-label">处理耗时</span><span class="report-value">${duration}s</span></div>
-            </div>
-            <button class="btn report-details-toggle" id="report-details-toggle" type="button" aria-expanded="false" aria-controls="${detailsId}">▸ 每跳详细数据</button>
-            <div class="report-details hidden" id="${detailsId}">${jumpDetails || '<div class="report-row"><span class="report-label">每跳详细数据</span><span class="report-value">暂无</span></div>'}</div>
-        `;
-        const toggle = document.getElementById('report-details-toggle');
-        const details = document.getElementById(detailsId);
-        if (toggle && details) {
-            toggle.addEventListener('click', () => {
-                const expanded = toggle.getAttribute('aria-expanded') === 'true';
-                toggle.setAttribute('aria-expanded', String(!expanded));
-                toggle.textContent = `${expanded ? '▸' : '▾'} 每跳详细数据`;
-                details.classList.toggle('hidden', expanded);
-            });
-        }
-        reportSection.classList.remove('hidden');
-        llmSection.classList.remove('hidden');
+        if (reportSection) reportSection.classList.add('hidden');
+        if (llmSection) llmSection.classList.remove('hidden');
         llmBtn.disabled = false;
+        if (aiWaiting) aiWaiting.classList.add('hidden');
+        renderJumpSequence(data);
+        setWorkflowTab('results');
     }
 
     function updateStats(data) {
         if (data.reps !== undefined) {
             statReps.textContent = data.reps;
             analysisResults.reps = data.reps;
+            setText(jumpCount, String(data.reps));
         }
         if (Array.isArray(data.completed_jumps)) {
             analysisResults.completedJumps = data.completed_jumps;
@@ -269,10 +574,15 @@ document.addEventListener('DOMContentLoaded', function() {
             landings.push(compactStats.landing);
         }
         renderLandingMap(landings);
+        renderFlightChart(data);
     }
 
     function startAnalysisPolling(videoId) {
         currentVideoId = videoId;
+        setProcessState('processing', '处理中');
+        setStage('processing', '处理中', '<p>步骤：<strong>视频分析</strong></p><p>正在识别跳次、动作和落点</p>');
+        setCalibrationStatus('分析中');
+        if (sequenceStep) sequenceStep.classList.add('hidden');
         analysisCanvas.width = videoPlayer.videoWidth || 640;
         analysisCanvas.height = videoPlayer.videoHeight || 480;
         analysisCanvas.hidden = true;
@@ -296,6 +606,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.status === 'processing') {
                     progressFill.style.width = `${data.progress}%`;
                     progressText.textContent = `处理中：${Math.round(data.progress)}%`;
+                    setText(progressStage, `正在分析视频：${Math.round(data.progress)}%`);
                     const currentProgress = Math.floor(data.progress / 10) * 10;
                     if (currentProgress > lastProgress && currentProgress > 0) {
                         addLog(`进度：${currentProgress}% | 跳次：${data.reps || 0} | 动作：${data.current_action || '--'}`, 'progress');
@@ -309,6 +620,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateStats(data);
                     progressFill.style.width = '100%';
                     progressText.textContent = '100%';
+                    setProcessState('success', '分析完成');
+                    setStage('completed', '分析完成', '<p>步骤：<strong>分析完成</strong></p><p>可查看动作序列、落点图和 AI 建议</p>');
+                    setCalibrationStatus('已完成');
                     addLog('分析完成。', 'success');
                     addFeedback('success', '分析完成，正在展示结果');
                     setTerminalStatus('Completed', 'success');
@@ -317,10 +631,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         videoPlayer.load();
                         videoPlayer.play();
                     }
-                    showTrampolineReport(data);
+                    showAnalysisSummary(data);
                     stopAnalysis();
                 } else if (data.status === 'error') {
                     clearInterval(analysisInterval);
+                    setProcessState('error', '分析失败');
+                    setStage('error', '分析失败', '<p>步骤：<strong>处理失败</strong></p><p>请查看日志反馈</p>');
                     addLog(`分析失败：${data.error}`, 'error');
                     addFeedback('error', `分析失败：${data.error}`);
                     setTerminalStatus('Error', 'error');
@@ -346,19 +662,26 @@ document.addEventListener('DOMContentLoaded', function() {
         analyzeBtn.disabled = true;
         resetBtn.disabled = true;
         reportSection.classList.add('hidden');
-        feedbackLog.innerHTML = '<div class="feedback-item info"><span class="feedback-time">--:--</span><span class="feedback-text">上传蹦床视频并开始分析后，这里会显示过程反馈。</span></div>';
+        feedbackLog.innerHTML = '<div class="feedback-item info"><span class="feedback-time">--:--</span><span class="feedback-text">上传蹦床视频并开始分析后，这里会记录后台消息。</span></div>';
         if (llmEventSource) {
             llmEventSource.close();
             llmEventSource = null;
         }
-        llmSection.classList.add('hidden');
+        llmSection.classList.remove('hidden');
         llmStreaming.classList.add('hidden');
         llmCards.classList.add('hidden');
         llmCards.classList.remove('visible');
         llmStreamingText.innerHTML = '';
         llmToggleRaw.classList.add('hidden');
         llmBtn.disabled = true;
+        resetLlmResults();
+        if (aiWaiting) aiWaiting.classList.remove('hidden');
+        setProcessState('idle', '等待上传');
+        setStage('upload', '等待上传', '<p>步骤：<strong>上传视频</strong></p><p>完成后进入床面四角标定</p>');
+        setCalibrationStatus('待上传');
+        setText(filenameEl, '未选择');
         resetStats();
+        setWorkflowTab('calibration');
     }
 
     function handleVideoFile(file) {
@@ -369,6 +692,10 @@ document.addEventListener('DOMContentLoaded', function() {
         playBtn.disabled = false;
         analyzeBtn.disabled = false;
         resetBtn.disabled = false;
+        setText(filenameEl, file.name);
+        setProcessState('ready', '视频已载入');
+        setStage('ready', '待上传', '<p>步骤：<strong>视频预览</strong></p><p>点击“上传并进入标定”开始床面标定</p>');
+        setCalibrationStatus('待上传');
         addLog(`已加载视频：${file.name}`, 'success');
         addLog(`文件大小：${(file.size / (1024 * 1024)).toFixed(2)} MB`, 'info');
         addFeedback('info', `已加载视频：${file.name}`);
@@ -429,7 +756,24 @@ document.addEventListener('DOMContentLoaded', function() {
         isAnalyzing = true;
         analyzeBtn.disabled = true;
         stopAnalysisBtn.disabled = false;
-        analysisResults = { reps: 0, feedbacks: [], startTime: new Date(), endTime: null, completedJumps: [] };
+        analysisResults = {
+            reps: 0,
+            feedbacks: [],
+            startTime: new Date(),
+            endTime: null,
+            completedJumps: [],
+            durationSeconds: 0,
+            actionBreakdown: '—',
+            transitionCount: 0,
+            llmSections: {},
+            llmFullText: '',
+            llmSource: '',
+            activeLlmSection: '整体表现',
+        };
+        setProcessState('processing', '上传中');
+        setStage('uploading', '上传中', '<p>步骤：<strong>上传视频</strong></p><p>正在提取首帧并准备标定</p>');
+        setCalibrationStatus('待标定');
+        if (sequenceStep) sequenceStep.classList.add('hidden');
 
         setTerminalStatus('Processing', 'running');
         addLog('开始蹦床视频分析...', 'processing');
@@ -447,6 +791,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 addLog(`上传失败：${data.error}`, 'error');
                 addFeedback('error', `上传失败：${data.error}`);
                 setTerminalStatus('Error', 'error');
+                setProcessState('error', '上传失败');
+                setStage('error', '上传失败', '<p>步骤：<strong>上传失败</strong></p><p>请查看反馈后重新选择视频</p>');
                 stopAnalysis();
                 return;
             }
@@ -455,6 +801,10 @@ document.addEventListener('DOMContentLoaded', function() {
             currentVideoId = data.video_id;
             isAnalyzing = false;
             stopAnalysisBtn.disabled = true;
+            setProcessState('idle', '等待标定');
+            setStage('calibration', '床面标定', '<p>步骤：<strong>床面四角标定</strong></p><p>顺序：<strong>前左 → 前右 → 后右 → 后左</strong></p><p>添加当前帧后点击视频标记角点</p>');
+            setCalibrationStatus('标定中');
+            setWorkflowTab('calibration');
             addLog('请先完成床面关键帧标定，再启动分析。', 'info');
             addFeedback('info', '请预览/暂停视频，在一个或多个关键帧标记床面四角后开始分析');
             if (!trampolineCalibrationController) {
@@ -469,6 +819,8 @@ document.addEventListener('DOMContentLoaded', function() {
             addLog(`网络错误：${error.message}`, 'error');
             addFeedback('error', 'Failed to upload video');
             setTerminalStatus('Error', 'error');
+            setProcessState('error', '上传失败');
+            setStage('error', '上传失败', '<p>步骤：<strong>上传失败</strong></p><p>请查看反馈后重试</p>');
             stopAnalysis();
         }
     });
@@ -497,6 +849,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 analysisResults.startTime = new Date();
                 stopAnalysisBtn.disabled = false;
                 setTerminalStatus('Processing', 'running');
+                setProcessState('processing', '处理中');
+                setStage('processing', '处理中', '<p>步骤：<strong>视频分析</strong></p><p>正在识别跳次、动作和落点</p>');
+                setCalibrationStatus('分析中');
                 startAnalysisPolling(videoId);
             },
         });
@@ -517,6 +872,7 @@ document.addEventListener('DOMContentLoaded', function() {
             llmCards.classList.add('hidden');
             llmCards.classList.remove('visible');
             llmToggleRaw.classList.add('hidden');
+            resetLlmResults();
 
             let finished = false;
             llmEventSource = new EventSource(`/api/video/llm_analysis/${currentVideoId}`);
@@ -535,19 +891,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     finished = true;
                     llmEventSource.close();
                     llmEventSource = null;
-                    const sectionMap = {
-                        '整体表现': 'llm-card-overview',
-                        '主要问题': 'llm-card-issues',
-                        '逐跳点评': 'llm-card-details',
-                        '改进建议': 'llm-card-suggestions',
-                    };
-                    for (const [heading, cardId] of Object.entries(sectionMap)) {
-                        const card = document.getElementById(cardId);
-                        if (!card) continue;
-                        const body = card.querySelector('.llm-card-body');
-                        const content = (data.sections && data.sections[heading]) || '';
-                        body.innerHTML = content ? simpleMd(content) : '<span style="color:#999">AI 未生成此部分</span>';
-                    }
+                    setLlmSections(data.sections || {}, data.full_text || '', data.source || '');
                     llmStreaming.classList.add('collapsed');
                     llmCards.classList.remove('hidden');
                     requestAnimationFrame(() => llmCards.classList.add('visible'));
@@ -579,6 +923,41 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    llmTabs.forEach(tab => {
+        tab.addEventListener('click', () => renderLlmSection(tab.dataset.llmSection || '整体表现'));
+    });
+
+    if (showCalibrationBtn) {
+        showCalibrationBtn.addEventListener('click', () => setWorkflowTab('calibration'));
+    }
+
+    if (showResultsBtn) {
+        showResultsBtn.addEventListener('click', () => setWorkflowTab('results'));
+    }
+
+    if (recalibrateBtn) {
+        recalibrateBtn.addEventListener('click', () => {
+            if (!videoFile) {
+                addFeedback('warning', '请重新选择原始视频后再标定');
+                return;
+            }
+            addFeedback('info', '正在重新上传原始视频以进入新一轮床面标定');
+            handleVideoFile(videoFile);
+            reportSection.classList.add('hidden');
+            llmSection.classList.remove('hidden');
+            llmBtn.disabled = true;
+            llmStreaming.classList.add('hidden');
+            llmCards.classList.add('hidden');
+            llmCards.classList.remove('visible');
+            llmStreamingText.innerHTML = '';
+            llmToggleRaw.classList.add('hidden');
+            resetLlmResults();
+            if (aiWaiting) aiWaiting.classList.remove('hidden');
+            setWorkflowTab('calibration');
+            analyzeBtn.click();
+        });
+    }
+
     downloadReportBtn.addEventListener('click', () => {
         const jumps = analysisResults.completedJumps || [];
         const realJumps = jumps.filter(j => !j.is_intermediate);
@@ -591,7 +970,9 @@ document.addEventListener('DOMContentLoaded', function() {
 结果摘要
 ------------------------------
 总跳次：${analysisResults.reps}
-过渡跳：${jumps.filter(j => j.is_intermediate).length}
+过渡跳：${analysisResults.transitionCount}
+动作分布：${analysisResults.actionBreakdown}
+处理耗时：${analysisResults.durationSeconds ? `${analysisResults.durationSeconds}s` : '--'}
 
 逐跳明细
 ------------------------------
@@ -606,6 +987,10 @@ ${realJumps.map((j, i) => {
 反馈日志
 ------------------------------
 ${analysisResults.feedbacks.map(f => `[${f.time}] ${f.type.toUpperCase()}: ${f.message}`).join('\n')}
+
+AI 分析
+------------------------------
+${formatAiReportText()}
         `;
         const blob = new Blob([reportText], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -623,6 +1008,12 @@ ${analysisResults.feedbacks.map(f => `[${f.time}] ${f.type.toUpperCase()}: ${f.m
         });
     }
 
+    clearScorePlaceholders();
+    renderFlightChart({});
+    setProcessState('idle', '等待上传');
+    setStage('upload', '等待上传', '<p>步骤：<strong>上传视频</strong></p><p>完成后进入床面四角标定</p>');
+    setCalibrationStatus('待上传');
+    setWorkflowTab('calibration');
     addLog('系统已初始化，等待上传蹦床视频。', 'info');
     initTrampolineCalibrationController();
 });

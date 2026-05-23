@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蹦床AI裁判系统 · 离线视频分析</title>
+    <link rel="stylesheet" href="static/css/video_analysis_redesign.css">
+</head>
+<body>
+<div class="app-shell" data-analysis-stage="calibration">
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-icon">
+                <span class="athlete-mark">⌁</span>
+                <span class="bed-mark"></span>
+            </div>
+            <div>
+                <h1>蹦床AI裁判系统 · 视频分析页面</h1>
+                <p>视频上传 · 床面标定 · 动作分析 · FIG 量化评分</p>
+            </div>
+        </div>
+
+        <nav class="mode-tabs" aria-label="页面切换">
+            <button class="mode-tab" id="live-tab" type="button">实时裁判</button>
+            <button class="mode-tab active" id="offline-tab" type="button">离线视频分析</button>
+        </nav>
+
+        <div class="header-tools">
+            <div class="status-chip" id="process-chip"><i class="dot amber"></i><span>等待标定</span></div>
+            <div class="status-chip muted"><i class="dot blue"></i><span>视频模式</span></div>
+            <button class="export-btn" id="export-report" type="button">↓ 导出报告</button>
+            <div class="judge"><span class="avatar"></span><b>裁判员</b><span>⌄</span></div>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <section class="panel video-panel">
+            <div class="panel-head">
+                <h2>离线视频画面</h2>
+                <span class="head-tag" id="video-state-tag">标定准备中</span>
+            </div>
+
+            <div class="video-container" id="video-container">
+                <div class="demo-video" id="demo-frame">
+                    <div class="hall-roof"></div>
+                    <div class="hall-seats"></div>
+                    <div class="demo-bed"></div>
+                    <div class="demo-person">
+                        <span class="body-head"></span>
+                        <span class="body-core"></span>
+                        <span class="limb arm-one"></span>
+                        <span class="limb arm-two"></span>
+                        <span class="limb leg-one"></span>
+                        <span class="limb leg-two"></span>
+                    </div>
+                    <svg class="skeleton-preview" viewBox="0 0 700 420" preserveAspectRatio="none">
+                        <path d="M306 142 L340 163 L375 150 M340 163 L338 204 L400 208 L458 169 M338 204 L284 194 L252 160"/>
+                        <g>
+                            <circle cx="306" cy="142" r="5"/><circle cx="340" cy="163" r="5"/>
+                            <circle cx="375" cy="150" r="5"/><circle cx="338" cy="204" r="5"/>
+                            <circle cx="400" cy="208" r="5"/><circle cx="458" cy="169" r="5"/>
+                            <circle cx="284" cy="194" r="5"/><circle cx="252" cy="160" r="5"/>
+                        </g>
+                    </svg>
+                </div>
+                <video id="video-player" class="hidden" controls></video>
+                <canvas id="analysis-canvas"></canvas>
+
+                <div class="overlay-pill">本地上传视频</div>
+                <div class="frame-info" id="frame-info">
+                    <p>步骤：<strong>床面四角标定</strong></p>
+                    <p>顺序：<strong>前左 → 前右 → 后右 → 后左</strong></p>
+                    <p>点击视频标记角点</p>
+                </div>
+            </div>
+
+            <div class="video-toolbar">
+                <input type="file" id="video-input" accept="video/*" hidden>
+                <button class="tool-btn primary" id="browse-btn" type="button">＋ 选择本地视频</button>
+                <button class="tool-btn" id="enter-calibration" type="button">⌖ 进入标定</button>
+                <button class="tool-btn blue" id="demo-result" type="button">▶ 演示分析结果</button>
+                <button class="tool-btn ghost" id="reset-demo" type="button">↻ 重置</button>
+            </div>
+
+            <div class="analysis-progress">
+                <div class="progress-caption">
+                    <span id="progress-stage">等待完成床面标定</span>
+                    <strong id="progress-text">0%</strong>
+                </div>
+                <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+            </div>
+        </section>
+
+        <section class="panel landing-panel">
+            <div class="panel-head">
+                <h2>落点可视化</h2>
+                <span class="soft-label">顶视图</span>
+            </div>
+            <div class="landing-area">
+                <div class="landing-bed" id="landing-map-bed">
+                    <span class="bed-cross vertical"></span>
+                    <span class="bed-cross horizontal"></span>
+                    <span class="empty-landing" id="empty-landing">分析完成后显示落点</span>
+                </div>
+                <div class="legend">
+                    <span><i class="legend-center"></i>中心点</span>
+                    <span><i class="legend-current"></i>本次落点</span>
+                    <span><i class="legend-history"></i>历史落点</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel score-panel">
+            <div class="panel-head">
+                <h2>实时评分</h2>
+                <span class="soft-label">离线回放随帧更新</span>
+            </div>
+            <div class="score-cards">
+                <div class="score-card"><span>难度分 D</span><strong id="score-d">--</strong><em>/10.0</em></div>
+                <div class="score-card"><span>完成分 E</span><strong id="score-e">--</strong><em>/20.0</em></div>
+                <div class="score-card"><span>腾空时间分 T</span><strong id="score-t">--</strong><em>/20.0</em></div>
+                <div class="score-card total"><span>综合得分</span><strong id="score-total">--</strong><em>/50.0</em></div>
+            </div>
+            <div class="deduction-box">
+                <div class="deduction-title"><b>扣分与说明</b><span>共扣 <strong id="deduction-total">--</strong> 分</span></div>
+                <ul class="deduction-list" id="deduction-list">
+                    <li class="empty">完成分析后生成评分明细</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="panel flight-panel">
+            <div class="panel-head">
+                <h2>腾空时间曲线</h2>
+                <span class="soft-label">(s)</span>
+            </div>
+            <svg id="flight-chart" viewBox="0 0 410 170" class="chart"></svg>
+        </section>
+
+        <section class="panel workflow-panel">
+            <div class="panel-head workflow-head">
+                <h2 id="workflow-title">床面标定</h2>
+                <div class="step-switch">
+                    <button class="step-pill active" id="show-calibration" type="button">标定交互</button>
+                    <button class="step-pill" id="show-results" type="button">动作序列</button>
+                </div>
+            </div>
+
+            <div class="calibration-step" id="corner-marking-step">
+                <div class="calibration-intro">
+                    <div>
+                        <h3>在视频画面中点击床面四角</h3>
+                        <p>顺序：<b>前左 → 前右 → 后右 → 后左</b>。原项目的角点标定交互可整体移入此区域。</p>
+                    </div>
+                    <div class="corner-counter">
+                        已标记 <strong id="corner-count">0/4</strong>
+                    </div>
+                </div>
+
+                <div class="calibration-content">
+                    <div class="calibration-frame-list">
+                        <div class="subhead">关键帧标定列表</div>
+                        <div class="calibration-chip active">
+                            <span>关键帧 01</span>
+                            <small>00:00.000 · 编辑中</small>
+                        </div>
+                        <div class="calibration-chip pending">
+                            <span>＋ 添加当前帧标定</span>
+                            <small>支持补充多组关键帧</small>
+                        </div>
+                    </div>
+                    <div class="calibration-state">
+                        <div class="subhead">当前标定状态</div>
+                        <div class="status-row"><span>视频 ID</span><b>DEMO-VIDEO-001</b></div>
+                        <div class="status-row"><span>床面尺寸</span><b>4.28 m × 2.14 m</b></div>
+                        <div class="status-row"><span>角点顺序</span><b id="corner-next">下一点：前左</b></div>
+                        <div class="calibration-actions">
+                            <button class="mini-action" id="mock-points" type="button">加载演示角点</button>
+                            <button class="mini-action" id="reset-corners" type="button">重置角点</button>
+                            <button class="mini-action primary" id="start-trampoline-analysis" type="button" disabled>保存并开始分析</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sequence-step hidden" id="sequence-step">
+                <div class="sequence-toolbar">
+                    <span>分析完成，共识别 <b>8</b> 次有效跳跃</span>
+                    <button class="mini-action" id="recalibrate" type="button">⌖ 重新标定</button>
+                </div>
+                <div class="table-shell">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>跳次</th><th>动作</th><th>D</th><th>E</th><th>T</th><th>综合得分</th><th>落点偏移</th><th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jump-table-body"></tbody>
+                    </table>
+                </div>
+                <p class="table-note">保留“重新标定”按钮，调整床面四角后可重新运行落点与评分分析。</p>
+            </div>
+        </section>
+
+        <section class="panel ai-panel">
+            <div class="panel-head">
+                <h2>AI分析建议</h2>
+                <span class="llm-badge">LLM 智能分析</span>
+            </div>
+            <div class="ai-waiting" id="ai-waiting">
+                <div class="empty-icon">✦</div>
+                <h3>等待分析结果</h3>
+                <p>完成床面标定并开始分析后，在这里显示整体表现、主要问题、逐跳点评和训练建议。</p>
+            </div>
+            <div class="ai-content hidden" id="ai-content">
+                <article class="analysis-item green">
+                    <span>↗</span>
+                    <div><h3>整体腾空节奏较稳定</h3><p>前 8 跳平均腾空时间 1.20 s，波动较小，动作衔接流畅。</p></div>
+                </article>
+                <article class="analysis-item orange">
+                    <span>◎</span>
+                    <div><h3>第 4 跳落点偏右，建议加强中心控制</h3><p>落点偏移 +0.18 m，超过理想范围；建议调整起跳方向与空中轴线。</p></div>
+                </article>
+                <article class="analysis-item blue">
+                    <span>♙</span>
+                    <div><h3>后半程动作打开略慢</h3><p>第 5 跳后完成分略有下降，可优化翻转后半程打开节奏。</p></div>
+                </article>
+                <button class="llm-button" id="detail-analysis" type="button">✦ 生成详细解读</button>
+            </div>
+            <div class="process-log">
+                <div class="log-title">处理反馈</div>
+                <div id="log-list">
+                    <p><time>--:--</time> 上传视频并完成床面标定后开始分析。</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bottom-bar">
+        <div class="session-meta">
+            <span>◉ 分析类型：<b>离线视频</b></span>
+            <span>视频文件：<b id="filename">示例蹦床视频.mp4</b></span>
+            <span>标定状态：<b id="calibration-footer">待标定</b></span>
+            <span>已识别跳次：<b class="emphasis" id="jump-count">0 / 10</b></span>
+        </div>
+        <div class="footer-actions">
+            <button class="footer-btn start" id="bottom-analyze" type="button">▶ 开始分析</button>
+            <button class="footer-btn blue" id="bottom-calibrate" type="button">⌖ 床面标定</button>
+            <button class="footer-btn save" id="download-json" type="button">▣ 保存结果</button>
+        </div>
+    </footer>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="static/js/video_analysis_redesign.js"></script>
+</body>
+</html>
