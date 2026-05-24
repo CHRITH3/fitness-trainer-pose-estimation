@@ -240,10 +240,46 @@ def _sync_analysis_from_results(analysis, results):
         'current_flight_duration_s',
         'latest_landing',
         'landings',
+        'score',
+        'score_selected_jump_numbers',
     )
     for field in optional_fields:
         if field in results:
             analysis[field] = results[field]
+
+
+def _compute_analysis_score(analysis, selected_jump_numbers=None):
+    from trampoline.score import ScoreSelectionError, compute_score
+
+    selected = selected_jump_numbers
+    if selected is None:
+        selected = analysis.get('score_selected_jump_numbers')
+    try:
+        score = compute_score(analysis, selected_jump_numbers=selected)
+    except ScoreSelectionError:
+        raise
+    analysis['score'] = score
+    if score.get('selected_jump_numbers'):
+        analysis['score_selected_jump_numbers'] = score['selected_jump_numbers']
+    return score
+
+
+def _score_for_status(analysis):
+    if analysis.get('status') not in ('processing', 'completed'):
+        return analysis.get('score')
+    try:
+        return _compute_analysis_score(analysis)
+    except Exception as exc:
+        logger.warning('Score computation failed: %s', exc)
+        return {
+            'status': 'insufficient_data',
+            'message': f'评分计算失败：{exc}',
+            'selected_jump_numbers': [],
+            'default_selected_jump_numbers': [],
+            'effective_jump_count': 0,
+            'components': {'D': None, 'E': None, 'T': None, 'H': None, 'P': 0.0, 'total': None},
+            'deductions': [],
+        }
 
 
 @app.route('/')
@@ -343,6 +379,8 @@ def upload_video():
         'current_flight_duration_s': 0.0,
         'latest_landing': None,
         'landings': [],
+        'score': None,
+        'score_selected_jump_numbers': None,
         'corner_order': TRAMPOLINE_CORNER_ORDER,
         'corners': None,
         'started': False,
@@ -443,6 +481,8 @@ def start_trampoline_analysis():
     analysis['feedback'] = f'Processing trampoline video with {len(canonical_calibrations)} calibration(s)'
     analysis['error'] = None
     analysis['started'] = True
+    analysis['score'] = None
+    analysis['score_selected_jump_numbers'] = None
 
     thread = threading.Thread(target=process_video_subprocess, args=(video_id,))
     thread.daemon = True
@@ -578,6 +618,8 @@ def get_video_status(video_id):
     if analysis.get('processed_video') and os.path.exists(analysis.get('processed_video', '')):
         has_processed_video = True
 
+    score = _score_for_status(analysis)
+
     return jsonify({
         'status': analysis['status'],
         'progress': analysis['progress'],
@@ -600,7 +642,34 @@ def get_video_status(video_id):
         'landings': analysis.get('landings', []),
         'fps': analysis.get('fps'),
         'video_fps': analysis.get('video_fps'),
+        'score': score,
     })
+
+
+@app.route('/api/video/score/<video_id>', methods=['POST'])
+def score_video(video_id):
+    analysis = video_analyses.get(video_id)
+    if not analysis:
+        return jsonify({'success': False, 'status': 'not_found', 'error': 'Video ID not found'}), 404
+    if analysis.get('mode') != 'trampoline':
+        return jsonify({'success': False, 'error': 'Scoring only available for trampoline mode'}), 400
+    if analysis.get('status') != 'completed':
+        return jsonify({'success': False, 'error': 'Video analysis not yet complete'}), 400
+
+    data = request.get_json(silent=True) or {}
+    selected = data.get('selected_jump_numbers')
+    try:
+        score = _compute_analysis_score(analysis, selected_jump_numbers=selected)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+    try:
+        from trampoline.llm_service import clear_cached
+        clear_cached(video_id)
+    except Exception:
+        pass
+
+    return jsonify({'success': True, 'score': score})
 
 
 @app.route('/api/video/llm_analysis/<video_id>', methods=['GET'])
@@ -624,6 +693,10 @@ def llm_analysis(video_id):
         return sse_message({'type': 'error', 'message': 'LLM analysis only available for trampoline mode'})
     if analysis.get('status') != 'completed':
         return sse_message({'type': 'error', 'message': 'Video analysis not yet complete'})
+
+    score = _score_for_status(analysis)
+    if score and score.get('status') == 'selection_required':
+        return sse_message({'type': 'error', 'message': '请先确认用于评分的 10 个有效跳次，再启动 AI 分析'})
 
     try:
         from trampoline.llm_service import (
@@ -672,17 +745,40 @@ def llm_analysis(video_id):
         quality_thread = threading.Thread(target=run_quality, daemon=True)
         quality_thread.start()
 
+        def llm_error_payload(message, *, stage='final', fast_error_text=None, quality_error_text=None):
+            return {
+                'type': 'error' if stage == 'final' else stage,
+                'message': message,
+                'provider': 'deepseek',
+                'fast_model': fast_model,
+                'quality_model': quality_model,
+                'fast_error': fast_error_text,
+                'quality_error': quality_error_text,
+                'hint': 'DeepSeek API TLS/网络连接失败。请检查代理、出口网络或稍后重试。',
+            }
+
         fast_full_text = ''
+        fast_error = None
         prev_chunk = ''
         try:
             for raw_chunk in stream_llm_analysis(report, model=fast_model):
                 cleaned = clean_chunk(raw_chunk, prev_chunk)
                 if cleaned:
+                    if cleaned.lstrip().startswith('[ERROR]'):
+                        fast_error = cleaned.strip()
+                        payload = llm_error_payload(
+                            '快速模型连接失败，继续等待高质量分析结果',
+                            stage='fast_error',
+                            fast_error_text=fast_error,
+                        )
+                        yield f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+                        break
                     fast_full_text += cleaned
                     yield f"data: {_json.dumps({'type': 'chunk', 'text': cleaned}, ensure_ascii=False)}\n\n"
                     prev_chunk = cleaned
 
-            yield f"data: {_json.dumps({'type': 'fast_done'}, ensure_ascii=False)}\n\n"
+            if not fast_error:
+                yield f"data: {_json.dumps({'type': 'fast_done'}, ensure_ascii=False)}\n\n"
             quality_thread.join(timeout=120)
 
             if quality_result.get('text'):
@@ -692,7 +788,13 @@ def llm_analysis(video_id):
                 final_text = fast_full_text
                 source = 'fast_fallback'
             else:
-                yield f"data: {_json.dumps({'type': 'error', 'message': '两个模型均调用失败'}, ensure_ascii=False)}\n\n"
+                details = quality_result.get('error') or fast_error or '两个模型均调用失败'
+                payload = llm_error_payload(
+                    f'DeepSeek AI 分析失败：{details}',
+                    fast_error_text=fast_error,
+                    quality_error_text=quality_result.get('error'),
+                )
+                yield f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
                 return
 
             sections = segment_response(final_text)

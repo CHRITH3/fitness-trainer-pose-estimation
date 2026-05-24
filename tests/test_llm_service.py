@@ -58,6 +58,14 @@ class TestAnalysisReport:
         assert report.extra_sections == ""
         assert report.landing_points is None
 
+    def test_score_is_preserved(self, mock_analysis):
+        mock_analysis["score"] = {
+            "status": "ready",
+            "components": {"D": 1.0, "E": 19.5, "T": 10.0, "H": 9.8, "P": 0.0, "total": 40.3},
+        }
+        report = AnalysisReport.from_video_analysis(mock_analysis)
+        assert report.score["components"]["total"] == 40.3
+
 
 class TestBuildPrompt:
     def test_returns_two_messages(self, mock_analysis):
@@ -90,6 +98,31 @@ class TestBuildPrompt:
         messages = build_prompt(report)
         user = messages[1]['content']
         assert '落点偏移' in user
+
+    def test_score_section_included(self, mock_analysis):
+        mock_analysis["score"] = {
+            "status": "ready",
+            "selected_jump_numbers": list(range(1, 11)),
+            "components": {"D": 1.0, "E": 19.5, "T": 10.0, "H": 9.8, "P": 0.0, "total": 40.3},
+            "summary": {"difficulty_note": "候选难度"},
+            "deductions": [
+                {
+                    "jump_number": 1,
+                    "action": "Tuck",
+                    "difficulty": 0.5,
+                    "flight_s": 1.2,
+                    "h_deduction": 0.0,
+                    "e_deduction": 0.1,
+                    "notes": ["测试说明"],
+                },
+            ],
+        }
+        report = AnalysisReport.from_video_analysis(mock_analysis)
+        messages = build_prompt(report)
+        user = messages[1]['content']
+        assert '视觉量化评分' in user
+        assert '总分: 40.3' in user
+        assert '候选难度' in user
 
 
 class TestCleanChunk:

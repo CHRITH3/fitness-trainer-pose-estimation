@@ -60,8 +60,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const recalibrateBtn = document.getElementById('recalibrate-btn');
     const showCalibrationBtn = document.getElementById('show-calibration');
     const showResultsBtn = document.getElementById('show-results');
-    const scoreIds = ['score-d', 'score-e', 'score-t', 'score-total', 'deduction-total'];
-    const deductionList = document.getElementById('deduction-list');
+    const scoreIds = ['score-d', 'score-e', 'score-t', 'score-h', 'score-p', 'score-total'];
+    const scoreStatusLabel = document.getElementById('score-status-label');
+    const scoreActions = document.getElementById('score-actions');
+    const confirmScoreSelectionBtn = document.getElementById('confirm-score-selection');
+    const editScoreSelectionBtn = document.getElementById('edit-score-selection');
+    const submitScoreSelectionBtn = document.getElementById('submit-score-selection');
+    const scoreSelectionCount = document.getElementById('score-selection-count');
 
     const calibrationGeometry = window.TrampolineCalibrationGeometry;
     const trampolineCalibrationUi = window.TrampolineCalibrationUI;
@@ -78,6 +83,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let trampolineCalibrationController = null;
     let llmEventSource = null;
     let lastProgress = 0;
+    let scoreSelectionEditing = false;
+    let selectedScoreJumpNumbers = new Set();
 
     let analysisResults = {
         reps: 0,
@@ -92,6 +99,7 @@ document.addEventListener('DOMContentLoaded', function() {
         llmFullText: '',
         llmSource: '',
         activeLlmSection: '整体表现',
+        score: null,
     };
 
     function getTimestamp() {
@@ -160,9 +168,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function clearScorePlaceholders() {
         scoreIds.forEach(id => setText(document.getElementById(id), '--'));
-        if (deductionList) {
-            deductionList.innerHTML = '<li class="empty">第一阶段不生成 D/E/T 假分数</li>';
-        }
+        setText(scoreStatusLabel, '待分析');
+        if (scoreActions) scoreActions.classList.add('hidden');
+        scoreSelectionEditing = false;
+        selectedScoreJumpNumbers = new Set();
     }
 
     function setWorkflowTab(tab) {
@@ -212,10 +221,131 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
+    function formatScoreValue(value) {
+        const n = finiteNumber(value);
+        return n === null ? '--' : n.toFixed(2);
+    }
+
+    function setLlmAvailabilityFromScore(score) {
+        if (!llmBtn) return;
+        const analysisCompleted = appShell?.dataset.analysisStage === 'completed' || Boolean(analysisResults.endTime);
+        if (!currentVideoId || !score || !analysisCompleted) {
+            llmBtn.disabled = true;
+            return;
+        }
+        llmBtn.disabled = score.status === 'selection_required';
+    }
+
+    function updateScoreSelectionCount() {
+        if (!scoreSelectionCount) return;
+        const count = selectedScoreJumpNumbers.size;
+        scoreSelectionCount.textContent = `已选择 ${count} / 10`;
+        if (submitScoreSelectionBtn) submitScoreSelectionBtn.disabled = count !== 10;
+    }
+
+    function toggleScoreSelectionColumns(show) {
+        document.querySelectorAll('.score-select-col').forEach(node => {
+            node.classList.toggle('hidden', !show);
+        });
+    }
+
+    function renderScore(score) {
+        analysisResults.score = score || null;
+        const components = score?.components || {};
+        setText(document.getElementById('score-d'), formatScoreValue(components.D));
+        setText(document.getElementById('score-e'), formatScoreValue(components.E));
+        setText(document.getElementById('score-t'), formatScoreValue(components.T));
+        setText(document.getElementById('score-h'), formatScoreValue(components.H));
+        setText(document.getElementById('score-p'), formatScoreValue(components.P));
+        setText(document.getElementById('score-total'), formatScoreValue(components.total));
+
+        const labels = {
+            ready: '评分完成',
+            incomplete: '辅助估计',
+            selection_required: '需选择10跳',
+            insufficient_data: '数据不足',
+        };
+        setText(scoreStatusLabel, labels[score?.status] || '待分析');
+
+        const needsSelection = score?.status === 'selection_required';
+        if (scoreActions) scoreActions.classList.toggle('hidden', !needsSelection && !scoreSelectionEditing);
+        if (confirmScoreSelectionBtn) confirmScoreSelectionBtn.classList.toggle('hidden', scoreSelectionEditing || !needsSelection);
+        if (editScoreSelectionBtn) editScoreSelectionBtn.classList.toggle('hidden', scoreSelectionEditing || !needsSelection);
+        if (submitScoreSelectionBtn) submitScoreSelectionBtn.classList.toggle('hidden', !scoreSelectionEditing);
+        if (needsSelection && !selectedScoreJumpNumbers.size) {
+            selectedScoreJumpNumbers = new Set(score.default_selected_jump_numbers || []);
+        }
+        updateScoreSelectionCount();
+        setLlmAvailabilityFromScore(score);
+        toggleScoreSelectionColumns(scoreSelectionEditing);
+    }
+
+    function selectedScoreJumpList() {
+        return Array.from(selectedScoreJumpNumbers).sort((a, b) => a - b);
+    }
+
+    async function submitScoreSelection(numbers) {
+        if (!currentVideoId) return;
+        try {
+            const response = await fetch(`/api/video/score/${currentVideoId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_jump_numbers: numbers }),
+            });
+            const payload = await response.json();
+            if (!payload.success) {
+                addFeedback('error', payload.error || '评分失败');
+                return;
+            }
+            scoreSelectionEditing = false;
+            selectedScoreJumpNumbers = new Set(payload.score.selected_jump_numbers || []);
+            renderScore(payload.score);
+            renderJumpSequence({ completed_jumps: analysisResults.completedJumps, reps: analysisResults.reps });
+            addFeedback('success', '评分已更新，可启动 AI 分析');
+        } catch (error) {
+            addFeedback('error', `评分提交失败：${error.message}`);
+        }
+    }
+
+    function formatLlmErrorMessage(data = {}) {
+        const parts = [data.message || 'AI 分析失败'];
+        if (data.hint) parts.push(data.hint);
+        if (data.fast_error) parts.push(`快速模型：${data.fast_error}`);
+        if (data.quality_error) parts.push(`高质量模型：${data.quality_error}`);
+        return parts.filter(Boolean).join('\n');
+    }
+
+    function scoreDeductionByJumpNumber() {
+        const rows = analysisResults.score?.deductions;
+        if (!Array.isArray(rows)) return new Map();
+        return new Map(rows.map(row => [Number(row.jump_number), row]));
+    }
+
+    function renderScoreDetailButton(row) {
+        if (!row) return '';
+        const notes = Array.isArray(row.notes) ? row.notes.join('；') : '';
+        const detail = notes || row.difficulty_note || '暂无额外扣分说明';
+        return `
+            <span class="score-detail-wrap">
+                <button class="score-detail-trigger" type="button" aria-label="查看第 ${escapeHtml(row.jump_number)} 跳详细扣分说明">详细扣分说明</button>
+                <span class="score-detail-popover" role="tooltip">
+                    <strong>第 ${escapeHtml(row.jump_number)} 跳 · ${escapeHtml(row.action || '--')}</strong>
+                    <span>D ${formatScoreValue(row.difficulty)}</span>
+                    <span>T ${formatScoreValue(row.flight_s)}s</span>
+                    <span>H扣 ${formatScoreValue(row.h_deduction)}</span>
+                    <span>E扣 ${formatScoreValue(row.e_deduction)}</span>
+                    <span>落点 ${formatScoreValue(row.landing_distance_m)}m</span>
+                    <em>${escapeHtml(detail)}</em>
+                </span>
+            </span>
+        `;
+    }
+
     function renderJumpSequence(data = {}) {
         if (!sequenceStep || !jumpTableBody) return;
         const jumps = data.completed_jumps || analysisResults.completedJumps || [];
         const { realJumps, transitionCount, actionBreakdown } = summarizeJumps(jumps);
+        const deductionMap = scoreDeductionByJumpNumber();
         const duration = analysisResults.durationSeconds || 0;
         analysisResults.actionBreakdown = actionBreakdown;
         analysisResults.transitionCount = transitionCount;
@@ -227,7 +357,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setText(jumpCount, String(data.reps || realJumps.length || 0));
 
         if (!realJumps.length) {
-            jumpTableBody.innerHTML = '<tr><td colspan="6">完成分析后显示动作序列</td></tr>';
+            jumpTableBody.innerHTML = '<tr><td colspan="7">完成分析后显示动作序列</td></tr>';
             return;
         }
 
@@ -237,9 +367,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const flightText = flight === null
                 ? (finiteNumber(jump.flight_frames) === null ? '--' : `${jump.flight_frames} 帧`)
                 : `${flight.toFixed(2)}s`;
+            const jumpNumber = jump.jump_number || index + 1;
+            const deduction = deductionMap.get(Number(jumpNumber));
+            const checked = selectedScoreJumpNumbers.has(Number(jumpNumber)) ? ' checked' : '';
             return `
                 <tr>
-                    <td>${jump.jump_number || index + 1}</td>
+                    <td class="score-select-col${scoreSelectionEditing ? '' : ' hidden'}"><input class="score-jump-checkbox" type="checkbox" data-jump-number="${jumpNumber}"${checked}></td>
+                    <td><span class="jump-number-cell"><b>${jumpNumber}</b>${renderScoreDetailButton(deduction)}</span></td>
                     <td>${jump.action || '--'}</td>
                     <td>${flightText}</td>
                     <td>${landing.coord}</td>
@@ -248,6 +382,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 </tr>
             `;
         }).join('');
+        jumpTableBody.querySelectorAll('.score-jump-checkbox').forEach(input => {
+            input.addEventListener('change', () => {
+                const jumpNumber = Number(input.dataset.jumpNumber);
+                if (input.checked) {
+                    selectedScoreJumpNumbers.add(jumpNumber);
+                } else {
+                    selectedScoreJumpNumbers.delete(jumpNumber);
+                }
+                updateScoreSelectionCount();
+            });
+        });
+        toggleScoreSelectionColumns(scoreSelectionEditing);
         sequenceStep.classList.remove('hidden');
     }
 
@@ -410,6 +556,27 @@ document.addEventListener('DOMContentLoaded', function() {
         return `${sectionText}${fullText}`;
     }
 
+    function formatScoreReportText() {
+        const score = analysisResults.score;
+        if (!score) return '视觉量化评分：尚未生成';
+        const components = score.components || {};
+        const lines = [
+            `评分状态：${score.status || '--'}`,
+            `选中跳次：${(score.selected_jump_numbers || []).join(', ') || '--'}`,
+            `D：${formatScoreValue(components.D)}`,
+            `E：${formatScoreValue(components.E)}`,
+            `T：${formatScoreValue(components.T)}`,
+            `H：${formatScoreValue(components.H)}`,
+            `P：${formatScoreValue(components.P)}`,
+            `总分：${formatScoreValue(components.total)}`,
+        ];
+        const deductions = (score.deductions || []).map(row => {
+            const notes = Array.isArray(row.notes) ? row.notes.join('；') : '';
+            return `第 ${row.jump_number} 跳 ${row.action}: D=${formatScoreValue(row.difficulty)}, T=${formatScoreValue(row.flight_s)}s, H扣=${formatScoreValue(row.h_deduction)}, E扣=${formatScoreValue(row.e_deduction)} ${notes}`;
+        });
+        return `${lines.join('\n')}${deductions.length ? `\n\n逐跳评分依据\n${deductions.join('\n')}` : ''}`;
+    }
+
     const { finiteNumber, validLanding, resolveCompactStats } = videoAnalysisHelpers;
 
     function formatFixed(value, digits = 2) {
@@ -541,9 +708,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (reportSection) reportSection.classList.add('hidden');
         if (llmSection) llmSection.classList.remove('hidden');
-        llmBtn.disabled = false;
         if (aiWaiting) aiWaiting.classList.add('hidden');
         renderJumpSequence(data);
+        renderScore(data.score || analysisResults.score);
         setWorkflowTab('results');
     }
 
@@ -575,6 +742,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         renderLandingMap(landings);
         renderFlightChart(data);
+        if (data.score) renderScore(data.score);
     }
 
     function startAnalysisPolling(videoId) {
@@ -680,6 +848,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setStage('upload', '等待上传', '<p>步骤：<strong>上传视频</strong></p><p>完成后进入床面四角标定</p>');
         setCalibrationStatus('待上传');
         setText(filenameEl, '未选择');
+        clearScorePlaceholders();
         resetStats();
         setWorkflowTab('calibration');
     }
@@ -769,7 +938,9 @@ document.addEventListener('DOMContentLoaded', function() {
             llmFullText: '',
             llmSource: '',
             activeLlmSection: '整体表现',
+            score: null,
         };
+        clearScorePlaceholders();
         setProcessState('processing', '上传中');
         setStage('uploading', '上传中', '<p>步骤：<strong>上传视频</strong></p><p>正在提取首帧并准备标定</p>');
         setCalibrationStatus('待标定');
@@ -875,6 +1046,10 @@ document.addEventListener('DOMContentLoaded', function() {
             resetLlmResults();
 
             let finished = false;
+            const header = llmStreaming.querySelector('.llm-streaming-header');
+            if (header) {
+                header.innerHTML = '<span class="llm-status-dot"></span><span>正在分析...</span>';
+            }
             llmEventSource = new EventSource(`/api/video/llm_analysis/${currentVideoId}`);
             llmEventSource.onmessage = function(e) {
                 let data;
@@ -883,10 +1058,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     llmStreamingText.innerHTML += simpleMd(data.text);
                     llmStreamingText.scrollTop = llmStreamingText.scrollHeight;
                 } else if (data.type === 'fast_done') {
-                    const header = llmStreaming.querySelector('.llm-streaming-header');
                     if (header) {
                         header.innerHTML = '<span class="llm-status-dot llm-quality-waiting"></span><span>正在生成高质量分析...</span>';
                     }
+                } else if (data.type === 'fast_error') {
+                    if (header) {
+                        header.innerHTML = '<span class="llm-status-dot llm-quality-waiting"></span><span>快速模型失败，继续等待高质量模型...</span>';
+                    }
+                    const warningText = `${data.message || '快速模型失败，继续等待高质量模型'}${data.hint ? `\n${data.hint}` : ''}`;
+                    llmStreamingText.innerHTML += `<br><span style="color:#f39c12; white-space: pre-wrap">${escapeHtml(warningText)}</span>`;
+                    llmStreamingText.scrollTop = llmStreamingText.scrollHeight;
                 } else if (data.type === 'done') {
                     finished = true;
                     llmEventSource.close();
@@ -901,7 +1082,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     finished = true;
                     llmEventSource.close();
                     llmEventSource = null;
-                    llmStreamingText.innerHTML += `<br><span style="color:#e74c3c">${data.message}</span>`;
+                    if (header) {
+                        header.innerHTML = '<span class="llm-status-dot"></span><span>AI 分析失败</span>';
+                    }
+                    llmStreamingText.innerHTML += `<br><span style="color:#e74c3c; white-space: pre-wrap">${escapeHtml(formatLlmErrorMessage(data))}</span>`;
                     llmBtn.disabled = false;
                 }
             };
@@ -933,6 +1117,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (showResultsBtn) {
         showResultsBtn.addEventListener('click', () => setWorkflowTab('results'));
+    }
+
+    if (confirmScoreSelectionBtn) {
+        confirmScoreSelectionBtn.addEventListener('click', () => {
+            const defaults = analysisResults.score?.default_selected_jump_numbers || [];
+            submitScoreSelection(defaults);
+        });
+    }
+
+    if (editScoreSelectionBtn) {
+        editScoreSelectionBtn.addEventListener('click', () => {
+            const defaults = analysisResults.score?.default_selected_jump_numbers || [];
+            selectedScoreJumpNumbers = new Set(defaults);
+            scoreSelectionEditing = true;
+            setWorkflowTab('results');
+            renderScore(analysisResults.score);
+            renderJumpSequence({ completed_jumps: analysisResults.completedJumps, reps: analysisResults.reps });
+        });
+    }
+
+    if (submitScoreSelectionBtn) {
+        submitScoreSelectionBtn.addEventListener('click', () => {
+            submitScoreSelection(selectedScoreJumpList());
+        });
     }
 
     if (recalibrateBtn) {
@@ -973,6 +1181,10 @@ document.addEventListener('DOMContentLoaded', function() {
 过渡跳：${analysisResults.transitionCount}
 动作分布：${analysisResults.actionBreakdown}
 处理耗时：${analysisResults.durationSeconds ? `${analysisResults.durationSeconds}s` : '--'}
+
+视觉量化评分
+------------------------------
+${formatScoreReportText()}
 
 逐跳明细
 ------------------------------

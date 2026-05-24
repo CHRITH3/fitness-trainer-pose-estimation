@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import app as app_module
 
@@ -71,6 +72,114 @@ def test_llm_analysis_route_still_exists_and_returns_streaming_error_for_unknown
     assert response.mimetype == 'text/event-stream'
     body = response.get_data(as_text=True)
     assert 'Video ID not found' in body
+
+
+def test_score_route_exists_and_returns_json_error_for_unknown_video():
+    client = app_module.app.test_client()
+    response = client.post('/api/video/score/unknown-video-id', json={'selected_jump_numbers': list(range(1, 11))})
+    assert response.status_code == 404
+    assert response.get_json()['status'] == 'not_found'
+
+
+def test_llm_fast_model_error_still_returns_quality_result(monkeypatch):
+    video_id = 'video-with-score'
+    app_module.video_analyses[video_id] = {
+        'mode': 'trampoline',
+        'status': 'completed',
+        'progress': 100,
+        'reps': 10,
+        'form_score': 100,
+        'avg_form_score': 100,
+        'grade': '--',
+        'state': 'COMPLETED',
+        'feedback': '',
+        'completed_jumps': [
+            {'jump_number': i, 'action': 'Tuck', 'flight_frames': 30, 'is_intermediate': False}
+            for i in range(1, 11)
+        ],
+        'fps': 30.0,
+        'total_frames': 300,
+        'resolution': '640x480',
+        'score': {
+            'status': 'ready',
+            'components': {'D': 5.0, 'E': 20.0, 'T': 10.0, 'H': 10.0, 'P': 0.0, 'total': 45.0},
+            'selected_jump_numbers': list(range(1, 11)),
+            'deductions': [],
+        },
+    }
+
+    monkeypatch.setattr('trampoline.llm_service.resolve_api_key', lambda: 'test-key')
+    monkeypatch.setattr('trampoline.llm_service.resolve_models', lambda: ('fast', 'quality'))
+    monkeypatch.setattr('trampoline.llm_service.stream_llm_analysis', lambda report, model=None: iter(['[ERROR] LLM 调用失败: APIConnectionError: Connection error.']))
+    monkeypatch.setattr('trampoline.llm_service.run_llm_analysis_sync', lambda report, model=None, timeout=90: '## 整体表现\n高质量\n## 主要问题\n无\n## 逐跳点评\n第1跳 稳定\n## 改进建议\n保持')
+
+    client = app_module.app.test_client()
+    response = client.get(f'/api/video/llm_analysis/{video_id}')
+    body = response.get_data(as_text=True)
+    events = [
+        json.loads(line.removeprefix('data: '))
+        for line in body.splitlines()
+        if line.startswith('data: ')
+    ]
+
+    assert any(event['type'] == 'fast_error' for event in events)
+    fast_error = [event for event in events if event['type'] == 'fast_error'][0]
+    assert fast_error['provider'] == 'deepseek'
+    assert fast_error['fast_model'] == 'fast'
+    assert 'APIConnectionError' in fast_error['fast_error']
+    assert '代理' in fast_error['hint']
+    done = [event for event in events if event['type'] == 'done'][-1]
+    assert done['source'] == 'quality'
+    assert done['sections']['整体表现'] == '高质量'
+
+
+def test_llm_both_models_connection_errors_return_actionable_hint(monkeypatch):
+    video_id = 'video-with-llm-errors'
+    app_module.video_analyses[video_id] = {
+        'mode': 'trampoline',
+        'status': 'completed',
+        'progress': 100,
+        'reps': 10,
+        'form_score': 100,
+        'avg_form_score': 100,
+        'grade': '--',
+        'state': 'COMPLETED',
+        'feedback': '',
+        'completed_jumps': [
+            {'jump_number': i, 'action': 'Tuck', 'flight_frames': 30, 'is_intermediate': False}
+            for i in range(1, 11)
+        ],
+        'fps': 30.0,
+        'total_frames': 300,
+        'resolution': '640x480',
+        'score': {
+            'status': 'ready',
+            'components': {'D': 5.0, 'E': 20.0, 'T': 10.0, 'H': 10.0, 'P': 0.0, 'total': 45.0},
+            'selected_jump_numbers': list(range(1, 11)),
+            'deductions': [],
+        },
+    }
+
+    monkeypatch.setattr('trampoline.llm_service.resolve_api_key', lambda: 'test-key')
+    monkeypatch.setattr('trampoline.llm_service.resolve_models', lambda: ('deepseek-v4-flash', 'deepseek-v4-pro'))
+    monkeypatch.setattr('trampoline.llm_service.stream_llm_analysis', lambda report, model=None: iter(['[ERROR] LLM 调用失败: APIConnectionError: Connection error.']))
+    monkeypatch.setattr('trampoline.llm_service.run_llm_analysis_sync', lambda report, model=None, timeout=90: '[ERROR] LLM 调用失败: APIConnectionError: Connection error.')
+
+    client = app_module.app.test_client()
+    response = client.get(f'/api/video/llm_analysis/{video_id}')
+    body = response.get_data(as_text=True)
+    events = [
+        json.loads(line.removeprefix('data: '))
+        for line in body.splitlines()
+        if line.startswith('data: ')
+    ]
+    final_error = [event for event in events if event['type'] == 'error'][-1]
+
+    assert final_error['provider'] == 'deepseek'
+    assert final_error['fast_model'] == 'deepseek-v4-flash'
+    assert final_error['quality_model'] == 'deepseek-v4-pro'
+    assert 'APIConnectionError' in final_error['message']
+    assert '出口网络' in final_error['hint']
 
 
 def test_retained_frontend_has_no_deleted_fitness_endpoint_references():

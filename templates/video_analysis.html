@@ -88,20 +88,22 @@
 
             <section class="panel score-panel">
                 <div class="panel-head">
-                    <h2>视觉评分预留</h2>
-                    <span class="soft-label">第一阶段占位</span>
+                    <h2>视觉量化评分</h2>
+                    <span class="soft-label" id="score-status-label">待分析</span>
                 </div>
                 <div class="score-cards">
-                    <div class="score-card"><span>难度分 D</span><strong id="score-d">--</strong><em>/10.0</em></div>
+                    <div class="score-card"><span>难度分 D</span><strong id="score-d">--</strong><em>候选</em></div>
                     <div class="score-card"><span>完成分 E</span><strong id="score-e">--</strong><em>/20.0</em></div>
-                    <div class="score-card"><span>腾空时间 T</span><strong id="score-t">--</strong><em>/20.0</em></div>
-                    <div class="score-card total"><span>综合得分</span><strong id="score-total">--</strong><em>/50.0</em></div>
+                    <div class="score-card"><span>腾空时间 T</span><strong id="score-t">--</strong><em>秒</em></div>
+                    <div class="score-card"><span>水平位移 H</span><strong id="score-h">--</strong><em>/10.0</em></div>
+                    <div class="score-card"><span>附加罚分 P</span><strong id="score-p">--</strong><em>默认0</em></div>
+                    <div class="score-card total"><span>总分</span><strong id="score-total">--</strong><em>D+E+T+H-P</em></div>
                 </div>
-                <div class="deduction-box">
-                    <div class="deduction-title"><b>扣分与说明</b><span>视觉量化估计待接入</span></div>
-                    <ul class="deduction-list" id="deduction-list">
-                        <li class="empty">第一阶段不生成 D/E/T 假分数</li>
-                    </ul>
+                <div class="score-actions hidden" id="score-actions">
+                    <button class="btn primary-btn" id="confirm-score-selection" type="button">确认前10跳评分</button>
+                    <button class="btn" id="edit-score-selection" type="button">修改评分跳次</button>
+                    <button class="btn primary-btn hidden" id="submit-score-selection" type="button" disabled>提交所选10跳</button>
+                    <span id="score-selection-count">已选择 0 / 10</span>
                 </div>
             </section>
 
@@ -166,6 +168,7 @@
                         <table>
                             <thead>
                                 <tr>
+                                    <th class="score-select-col hidden">评分</th>
                                     <th>跳次</th>
                                     <th>动作</th>
                                     <th>腾空</th>
@@ -175,7 +178,7 @@
                                 </tr>
                             </thead>
                             <tbody id="jump-table-body">
-                                <tr><td colspan="6">完成分析后显示动作序列</td></tr>
+                                <tr><td colspan="7">完成分析后显示动作序列</td></tr>
                             </tbody>
                         </table>
                     </div>

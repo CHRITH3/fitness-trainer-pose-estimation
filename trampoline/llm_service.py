@@ -31,6 +31,7 @@ class AnalysisReport:
     landing_points: Optional[list] = None
     form_scores: Optional[list] = None
     rotation_data: Optional[list] = None
+    score: Optional[dict] = None
     extra_sections: str = ""
 
     @classmethod
@@ -62,6 +63,7 @@ class AnalysisReport:
             completed_jumps=enriched,
             action_distribution=dist,
             landing_points=landing_points or None,
+            score=analysis.get("score"),
         )
 
 
@@ -73,6 +75,7 @@ _SYSTEM_PROMPT = """\
 ## 回答规则
 - 只能基于下方提供的结构化分析数据回答，不要猜测视频中未检测出的动作或问题
 - 如果某方面数据不足以做出判断，请明确说明"数据不足"，不要编造
+- 视觉量化评分中的 D 分是候选难度估计，E 分是可量化完成质量估计，不要表述为正式 FIG 裁判定分
 - 语气专业但友好，面向运动员或教练
 
 ## 输出格式
@@ -137,6 +140,33 @@ def build_prompt(report: AnalysisReport) -> list:
                 f"距中心 {landing.get('dist_from_center_m', '?')}m | "
                 f"置信度 {landing.get('confidence', '?')}\n"
             )
+
+    if report.score:
+        components = report.score.get("components") or {}
+        user_content += "\n## 视觉量化评分\n"
+        user_content += (
+            f"- 评分状态: {report.score.get('status', '?')}\n"
+            f"- 选中跳次: {report.score.get('selected_jump_numbers') or '未确认'}\n"
+            f"- D 候选难度: {components.get('D')}\n"
+            f"- E 完成估计: {components.get('E')}\n"
+            f"- T 腾空时间: {components.get('T')}\n"
+            f"- H 水平位移: {components.get('H')}\n"
+            f"- P 附加罚分: {components.get('P')}\n"
+            f"- 总分: {components.get('total')}\n"
+        )
+        summary = report.score.get("summary") or {}
+        if summary:
+            user_content += "- 评分说明: " + "；".join(str(v) for v in summary.values() if v) + "\n"
+        deductions = report.score.get("deductions") or []
+        if deductions:
+            user_content += "- 逐跳评分依据:\n"
+            for row in deductions:
+                notes = "；".join(row.get("notes") or [])
+                user_content += (
+                    f"  第{row.get('jump_number')}跳 {row.get('action')}: "
+                    f"D={row.get('difficulty')}, T={row.get('flight_s')}s, "
+                    f"H扣={row.get('h_deduction')}, E扣={row.get('e_deduction')} | {notes}\n"
+                )
 
     if report.extra_sections:
         user_content += f"\n## 补充数据\n{report.extra_sections}\n"
@@ -319,3 +349,8 @@ def set_cached(video_id: str, full_text: str, sections: dict):
         "sections": sections,
         "timestamp": time.time(),
     }
+
+
+def clear_cached(video_id: str):
+    """Remove cached LLM result for a video id."""
+    _llm_cache.pop(video_id, None)

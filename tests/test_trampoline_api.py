@@ -106,6 +106,7 @@ def test_status_exposes_additive_runtime_fields(tmp_path):
     assert payload["fps"] == 30.0
     assert payload["video_fps"] == 5.0
     assert payload["completed_jumps"] == []
+    assert payload["score"]["status"] == "insufficient_data"
 
 
 def test_sync_analysis_from_results_preserves_runtime_seam():
@@ -138,6 +139,97 @@ def test_sync_analysis_from_results_preserves_runtime_seam():
     assert analysis["fps"] == 30.0
     assert analysis["video_fps"] == 30.0
     assert analysis["completed_jumps"][0]["landing"] == landing
+
+
+def test_status_exposes_ready_score_for_completed_ten_jump_analysis(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+    jumps = [
+        {
+            "jump_number": i,
+            "action": "Tuck",
+            "flight_frames": 30,
+            "is_intermediate": False,
+            "landing": {
+                "bed_xy_m": [0.1, 0.1],
+                "dist_from_center_m": 0.14,
+                "confidence": 0.9,
+            },
+        }
+        for i in range(1, 11)
+    ]
+    app_module.video_analyses[video_id].update({
+        "status": "completed",
+        "progress": 100,
+        "reps": 10,
+        "completed_jumps": jumps,
+        "fps": 30.0,
+    })
+
+    response = client.get(f"/api/video/status/{video_id}")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["score"]["status"] == "ready"
+    assert payload["score"]["components"]["total"] == pytest.approx(45.0)
+
+
+def test_status_requires_score_selection_for_more_than_ten_effective_jumps(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+    app_module.video_analyses[video_id].update({
+        "status": "completed",
+        "progress": 100,
+        "reps": 12,
+        "completed_jumps": [
+            {
+                "jump_number": i,
+                "action": "Tuck",
+                "flight_frames": 30,
+                "is_intermediate": False,
+                "landing": {"bed_xy_m": [0.1, 0.1], "confidence": 0.9},
+            }
+            for i in range(1, 13)
+        ],
+        "fps": 30.0,
+    })
+
+    response = client.get(f"/api/video/status/{video_id}")
+    payload = response.get_json()
+
+    assert payload["score"]["status"] == "selection_required"
+    assert payload["score"]["default_selected_jump_numbers"] == list(range(1, 11))
+
+
+def test_score_endpoint_saves_selected_jump_numbers(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+    app_module.video_analyses[video_id].update({
+        "status": "completed",
+        "progress": 100,
+        "reps": 12,
+        "completed_jumps": [
+            {
+                "jump_number": i,
+                "action": "Straight",
+                "flight_frames": 20 + i,
+                "is_intermediate": False,
+                "landing": {"bed_xy_m": [0.1, 0.1], "confidence": 0.9},
+            }
+            for i in range(1, 13)
+        ],
+        "fps": 30.0,
+    })
+
+    response = client.post(f"/api/video/score/{video_id}", json={
+        "selected_jump_numbers": list(range(3, 13)),
+    })
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["score"]["status"] == "ready"
+    assert app_module.video_analyses[video_id]["score_selected_jump_numbers"] == list(range(3, 13))
 
 
 def test_trampoline_upload_start_and_processing_idempotency(tmp_path):

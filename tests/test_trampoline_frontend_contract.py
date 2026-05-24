@@ -60,6 +60,17 @@ def test_trampoline_frontend_contract_uses_redesigned_workflow_and_hidden_compat
     assert 'id="sequence-duration"' in html
     assert 'class="panel flight-panel"' in html
     assert 'id="flight-chart"' in html
+    assert '视觉量化评分' in html
+    assert 'id="score-d"' in html
+    assert 'id="score-e"' in html
+    assert 'id="score-t"' in html
+    assert 'id="score-h"' in html
+    assert 'id="score-p"' in html
+    assert 'id="score-total"' in html
+    assert 'id="confirm-score-selection"' in html
+    assert 'id="edit-score-selection"' in html
+    assert 'id="submit-score-selection"' in html
+    assert '扣分与说明' not in html
     assert 'id="download-report-btn"' in html
     assert 'id="llm-active-panel"' in html
     assert 'data-llm-section="整体表现"' in html
@@ -72,16 +83,31 @@ def test_trampoline_frontend_contract_uses_redesigned_workflow_and_hidden_compat
     assert 'showAnalysisSummary' in js
     assert 'setWorkflowTab' in js
     assert 'renderFlightChart' in js
+    assert 'renderScore' in js
+    assert 'renderScoreDeductions' not in js
+    assert 'deductionList' not in js
+    assert 'score-detail-trigger' in js
+    assert 'score-detail-popover' in js
+    assert 'fast_error' in js
+    assert '继续等待高质量模型' in js
+    assert 'formatLlmErrorMessage' in js
+    assert 'DeepSeek API TLS/网络连接失败' in js or 'data.hint' in js
+    assert '/api/video/score/${currentVideoId}' in js
+    assert 'formatScoreReportText' in js
     assert 'renderLlmSection' in js
     assert 'renderJumpDetailPanel' in js
     assert 'llmFullText' in js
     assert 'AI 分析\n------------------------------' in js
+    assert '视觉量化评分\n------------------------------' in js
     assert '动作分布：${analysisResults.actionBreakdown}' in js
     assert 'report-details-toggle' not in js
     assert '.step-switch' in css
     assert '.sequence-summary' in css
     assert '.chart-line' in css
     assert '.flight-panel' in css
+    assert '.score-deduction-tabs' not in css
+    assert '.score-detail-popover' in css
+    assert 'grid-column: span 2' not in css
     assert '.llm-tabs' in css
     assert '.llm-active-panel' in css
     assert '.llm-jump-detail-popover' in css

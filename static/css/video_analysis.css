@@ -551,7 +551,7 @@ textarea {
 
 .score-cards {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 7px;
     padding: 4px 10px 9px;
 }
@@ -577,7 +577,7 @@ textarea {
 .score-card strong {
     margin: 8px 0 4px;
     color: #175dde;
-    font-size: 27px;
+    font-size: 24px;
     line-height: 1.1;
 }
 
@@ -598,38 +598,100 @@ textarea {
     color: #fff;
 }
 
-.deduction-box {
-    margin: 0 10px 12px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-}
-
-.deduction-title {
-    min-height: 35px;
+.score-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 0 10px;
-    border-bottom: 1px solid #e8eef6;
-    color: #34435b;
-    font-size: 12px;
+    gap: 7px;
+    flex-wrap: wrap;
+    padding: 0 10px 10px;
 }
 
-.deduction-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+.score-actions span {
     color: #617086;
     font-size: 12px;
 }
 
-.deduction-list li {
-    min-height: 30px;
-    display: flex;
+.score-select-col {
+    width: 56px;
+    text-align: center;
+}
+
+.score-jump-checkbox {
+    width: 16px;
+    height: 16px;
+}
+
+.jump-number-cell {
+    position: relative;
+    display: inline-flex;
     align-items: center;
-    padding: 0 10px;
+    gap: 8px;
+    min-width: 116px;
+}
+
+.score-detail-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.score-detail-trigger {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid #d8e3f1;
+    border-radius: 6px;
+    background: #f8fbff;
+    color: #1d5edc;
+    font-size: 12px;
+    cursor: help;
+    white-space: nowrap;
+}
+
+.score-detail-trigger:hover,
+.score-detail-trigger:focus {
+    border-color: #2168f3;
+    background: #eef5ff;
+    outline: none;
+}
+
+.score-detail-popover {
+    position: absolute;
+    z-index: 30;
+    left: 0;
+    top: calc(100% + 7px);
+    width: 260px;
+    max-height: 180px;
+    overflow-y: auto;
+    display: none;
+    padding: 10px 12px;
+    border: 1px solid #cbd8ea;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 28px rgba(15, 35, 72, 0.16);
+    color: #52617a;
+    text-align: left;
+    line-height: 1.55;
+}
+
+.score-detail-popover strong,
+.score-detail-popover span,
+.score-detail-popover em {
+    display: block;
+}
+
+.score-detail-popover strong {
+    margin-bottom: 5px;
+    color: #263750;
+}
+
+.score-detail-popover em {
+    margin-top: 5px;
+    color: #718097;
+    font-style: normal;
+}
+
+.score-detail-wrap:hover .score-detail-popover,
+.score-detail-wrap:focus-within .score-detail-popover {
+    display: block;
 }
 
 .chart {
