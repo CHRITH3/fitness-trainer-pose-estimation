@@ -3,80 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>蹦床项目首页</title>
+    <title>蹦床AI裁判系统 · 实时视频</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/video_analysis.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/trampoline_pages.css') }}">
 </head>
 <body>
-    <div class="container trampoline-shell-page">
-        <header>
-            <h1>🤸 蹦床视频分析</h1>
-            <p>首页作为蹦床实时页的入口壳层，当前可直接使用的主线是视频上传、标定与分析。</p>
-            <nav class="nav-links">
-                <a href="/video_analysis" class="nav-link">🎬 进入视频分析</a>
-                <a href="/dashboard" class="nav-link">📊 查看仪表盘</a>
-                <a href="/profile" class="nav-link">👤 训练档案</a>
+    <div class="app-shell realtime-page" data-mode="realtime" data-analysis-stage="standby">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-icon" aria-hidden="true">
+                    <span class="athlete-mark">⌁</span>
+                    <span class="bed-mark"></span>
+                </div>
+                <div>
+                    <h1>蹦床AI裁判系统 · 实时视频页面</h1>
+                    <p>实时视频流 · 床面状态 · 评分预览 · AI 建议预留</p>
+                </div>
+            </div>
+
+            <nav class="mode-tabs" aria-label="页面切换">
+                <a class="mode-tab active" href="/" aria-current="page">实时裁判</a>
+                <a class="mode-tab" href="/video_analysis">离线视频分析</a>
             </nav>
+
+            <div class="header-tools">
+                <div class="status-chip"><i class="dot amber"></i><span>等待连接</span></div>
+                <div class="status-chip muted"><i class="dot blue"></i><span>实时模式</span></div>
+                <a class="export-btn" href="/dashboard">训练看板</a>
+            </div>
         </header>
 
-        <div class="main-content trampoline-shell-layout">
-            <section class="video-container trampoline-hero-card">
-                <div class="video-placeholder trampoline-placeholder-card">
-                    <div class="placeholder-content">
-                        <div class="placeholder-icon">🧭</div>
-                        <p>这里保留为后续“蹦床实时相机页”入口。</p>
-                        <p class="placeholder-subcopy">当前版本先聚焦上传视频后的床面标定、跳次检测、动作识别与 AI 分析。</p>
-                        <a href="/video_analysis" class="btn primary-btn">前往蹦床视频分析</a>
+        <main class="dashboard-grid">
+            <section class="panel video-panel">
+                <div class="panel-head">
+                    <h2>实时视频画面</h2>
+                    <span class="head-tag">待连接</span>
+                </div>
+
+                <div class="video-container realtime-video-stage">
+                    <div class="realtime-placeholder">
+                        <div class="realtime-camera-mark" aria-hidden="true"></div>
+                        <h3>等待连接实时相机</h3>
+                        <p>当前阶段先完成实时裁判界面的视觉迁移，真实摄像头推流与实时姿态分析接口后续接入。</p>
+                        <div class="realtime-control-row">
+                            <button class="btn primary-btn" type="button" disabled>启动相机</button>
+                            <button class="btn" type="button" disabled>停止</button>
+                            <a class="btn" href="/video_analysis">切换到离线分析</a>
+                        </div>
+                    </div>
+                    <div class="frame-info">
+                        <p>状态：<strong>实时流待接入</strong></p>
+                        <p>保存记录时将标记为 realtime_video 来源</p>
+                    </div>
+                </div>
+
+                <div class="video-controls">
+                    <div class="progress-container">
+                        <span>实时流状态</span>
+                        <div class="progress-bar"><div class="progress-fill realtime-progress"></div></div>
+                        <span id="progress-text">待机</span>
+                    </div>
+                    <div class="control-buttons">
+                        <button class="btn primary-btn" disabled type="button">开始实时评分</button>
+                        <button class="btn" disabled type="button">床面标定</button>
+                        <button class="btn" disabled type="button">保存本次训练</button>
                     </div>
                 </div>
             </section>
 
-            <aside class="controls trampoline-shell-sidebar">
-                <section class="capability-summary trampoline-info-block">
-                    <h2>当前可用能力</h2>
-                    <div class="capability-panel">
-                        <ul class="placeholder-list">
-                            <li>上传蹦床视频</li>
-                            <li>首帧 / 关键帧床面四角标定</li>
-                            <li>跳次分割与动作识别</li>
-                            <li>处理后视频与 AI 讲解</li>
-                        </ul>
-                    </div>
-                </section>
+            <section class="panel landing-panel">
+                <div class="panel-head">
+                    <h2>落点图</h2>
+                    <span class="soft-label">实时预留</span>
+                </div>
+                <div class="landing-map" aria-label="实时落点图">
+                    <div class="landing-map-bed"></div>
+                    <div class="landing-map-empty">等待实时落点</div>
+                </div>
+            </section>
 
-                <section class="roadmap-summary trampoline-info-block">
-                    <h2>后续规划占位</h2>
-                    <div class="config-inputs placeholder-metrics">
-                        <div class="input-group shell-metric-card">
-                            <label>实时相机页</label>
-                            <div class="shell-metric-value">待开发</div>
-                        </div>
-                        <div class="input-group shell-metric-card">
-                            <label>训练看板接入</label>
-                            <div class="shell-metric-value">已预留</div>
-                        </div>
-                    </div>
-                </section>
+            <section class="panel score-panel">
+                <div class="panel-head">
+                    <h2>视觉量化评分</h2>
+                    <span class="soft-label">实时预览</span>
+                </div>
+                <div class="score-cards">
+                    <div class="score-card"><span>难度分 D</span><strong>--</strong><em>候选</em></div>
+                    <div class="score-card"><span>完成分 E</span><strong>--</strong><em>/20.0</em></div>
+                    <div class="score-card"><span>腾空时间 T</span><strong>--</strong><em>秒</em></div>
+                    <div class="score-card"><span>水平位移 H</span><strong>--</strong><em>/10.0</em></div>
+                    <div class="score-card"><span>附加罚分 P</span><strong>--</strong><em>默认0</em></div>
+                    <div class="score-card total"><span>总分</span><strong>--</strong><em>D+E+T+H-P</em></div>
+                </div>
+            </section>
 
-                <section class="transition-status trampoline-info-block">
-                    <h2>当前页面定位</h2>
-                    <div class="status-display shell-status-list">
-                        <div class="status-item">
-                            <span class="status-label">页面定位</span>
-                            <span class="status-value">实时页入口预留</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="status-label">当前主线</span>
-                            <span class="status-value">视频分析可直接使用</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="status-label">下一步</span>
-                            <span class="status-value">继续补齐更多训练能力</span>
-                        </div>
+            <section class="panel flight-panel">
+                <div class="panel-head">
+                    <h2>腾空时间曲线</h2>
+                    <span class="soft-label">(s)</span>
+                </div>
+                <div class="empty-chart">等待实时跳次数据</div>
+            </section>
+
+            <section class="panel workflow-panel">
+                <div class="panel-head workflow-head">
+                    <h2>实时裁判工作区</h2>
+                    <div class="step-switch" role="tablist" aria-label="工作区切换">
+                        <button class="step-pill active" type="button">标定交互</button>
+                        <button class="step-pill" type="button">动作序列</button>
                     </div>
-                </section>
-            </aside>
-        </div>
+                </div>
+                <div class="realtime-workspace">
+                    <div class="realtime-status-card">
+                        <span>视频源</span>
+                        <b>未连接</b>
+                        <p>后续接入真实实时视频流后，这里承接相机、帧率和床面标定状态。</p>
+                    </div>
+                    <div class="realtime-status-card">
+                        <span>数据来源</span>
+                        <b>realtime_video</b>
+                        <p>实时训练记录与离线视频记录分开保存，训练看板可按来源筛选。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel ai-panel">
+                <div class="section">
+                    <div class="ai-head-row">
+                        <h2>AI 分析</h2>
+                        <button class="btn primary-btn" disabled type="button">开始 AI 分析</button>
+                    </div>
+                    <div class="ai-waiting">
+                        <div class="empty-icon">✦</div>
+                        <h3>等待实时分析结果</h3>
+                        <p>实时流、动作序列和量化评分接入后，这里显示整体表现、主要问题、逐跳点评和训练建议。</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="bottom-bar">
+            <div class="session-meta">
+                <span>分析类型：<b>实时视频</b></span>
+                <span>视频源：<b>未连接</b></span>
+                <span>训练来源：<b class="emphasis">realtime_video</b></span>
+                <span>已识别跳次：<b class="emphasis">0</b></span>
+            </div>
+        </footer>
     </div>
 </body>
 </html>

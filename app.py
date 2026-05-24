@@ -17,6 +17,7 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
+from collections import Counter
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -36,6 +37,132 @@ MAX_VIDEO_SIZE_MB = 50
 MAX_VIDEO_DURATION_SEC = 120
 TRAMPOLINE_PENDING_TTL_SECONDS = 60 * 60
 TRAMPOLINE_CORNER_ORDER = ["front_left", "front_right", "back_right", "back_left"]
+TRAINING_SESSION_SOURCES = {"offline_video", "realtime_video"}
+
+
+def _training_sessions_path():
+    return os.path.join(UPLOAD_FOLDER, 'training_sessions.json')
+
+
+def _load_training_sessions():
+    path = _training_sessions_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning('Could not load training sessions from %s: %s', path, exc)
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _save_training_sessions(sessions):
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    path = _training_sessions_path()
+    tmp_path = f'{path}.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(sessions, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+
+def _completed_offline_candidates():
+    candidates = []
+    for video_id, analysis in video_analyses.items():
+        if analysis.get('mode') != 'trampoline' or analysis.get('status') != 'completed':
+            continue
+        score = _score_for_status(analysis)
+        jumps = analysis.get('completed_jumps') or []
+        candidates.append({
+            'video_id': video_id,
+            'created_at': _format_ts(analysis.get('created_at')),
+            'total_jumps': len(jumps) or int(analysis.get('reps') or 0),
+            'score_total': _score_total(score),
+        })
+    return sorted(candidates, key=lambda item: item.get('created_at') or '', reverse=True)
+
+
+def _format_ts(value):
+    if not value:
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, timezone.utc).isoformat().replace('+00:00', 'Z')
+    return str(value)
+
+
+def _score_total(score):
+    if not score:
+        return None
+    components = score.get('components') or {}
+    total = components.get('total')
+    return round(float(total), 2) if total is not None else None
+
+
+def _action_distribution(jumps):
+    counter = Counter()
+    for jump in jumps or []:
+        action = str(jump.get('action') or jump.get('action_type') or 'Unknown')
+        if action and action != '--':
+            counter[action] += 1
+    return dict(counter)
+
+
+def _normalize_training_source(value):
+    source = str(value or 'offline_video').strip()
+    return source if source in TRAINING_SESSION_SOURCES else None
+
+
+def _analysis_to_training_session(video_id, analysis, source='offline_video'):
+    jumps = analysis.get('completed_jumps') or []
+    score = _score_for_status(analysis)
+    selected = []
+    if score:
+        selected = score.get('selected_jump_numbers') or []
+    session_id = f'{source}-{video_id}'
+    return {
+        'id': session_id,
+        'source': source,
+        'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'video_id': video_id,
+        'total_jumps': len(jumps) or int(analysis.get('reps') or 0),
+        'effective_jumps': len([j for j in jumps if not j.get('is_intermediate')]),
+        'action_distribution': _action_distribution(jumps),
+        'score': score,
+        'score_total': _score_total(score),
+        'duration': analysis.get('duration') or analysis.get('video_duration') or analysis.get('processing_time_s'),
+        'selected_jump_numbers': selected,
+    }
+
+
+def _filter_training_sessions(source='all'):
+    sessions = _load_training_sessions()
+    if source in TRAINING_SESSION_SOURCES:
+        return [item for item in sessions if item.get('source') == source]
+    return sessions
+
+
+def _training_summary(sessions):
+    total_sessions = len(sessions)
+    total_jumps = sum(int(item.get('total_jumps') or 0) for item in sessions)
+    score_values = [
+        float(item.get('score_total'))
+        for item in sessions
+        if item.get('score_total') is not None
+    ]
+    action_counter = Counter()
+    source_counter = Counter()
+    for item in sessions:
+        source_counter[item.get('source') or 'offline_video'] += 1
+        action_counter.update(item.get('action_distribution') or {})
+    return {
+        'total_sessions': total_sessions,
+        'total_jumps': total_jumps,
+        'best_score': round(max(score_values), 2) if score_values else None,
+        'avg_score': round(sum(score_values) / len(score_values), 2) if score_values else None,
+        'dominant_action': action_counter.most_common(1)[0][0] if action_counter else '--',
+        'action_distribution': dict(action_counter),
+        'source_counts': dict(source_counter),
+    }
 
 
 def _extract_first_frame_b64(filepath):
@@ -171,42 +298,39 @@ def cleanup_expired_pending_trampoline_uploads(now=None):
 
 
 def _dashboard_context():
+    sessions = _filter_training_sessions('all')
+    summary = _training_summary(sessions)
+    offline_sessions = _filter_training_sessions('offline_video')
+    realtime_sessions = _filter_training_sessions('realtime_video')
+    pending_candidates = _completed_offline_candidates()
     return {
         'summary_cards': [
-            {'title': '视频分析流程', 'value': '已启用', 'note': '当前主线聚焦蹦床视频上传、标定与分析'},
-            {'title': '实时页面', 'value': '预留', 'note': '首页保留为后续蹦床实时页开发入口'},
-            {'title': '图表区域', 'value': '保留', 'note': '可继续承接落点分布、训练统计等模块'},
-            {'title': '当前阶段', 'value': '占位态', 'note': '先稳定视频分析主链路，再逐步补齐看板能力'},
+            {'title': '已保存训练', 'value': str(summary['total_sessions']), 'note': '离线与实时来源分开记录'},
+            {'title': '累计跳次', 'value': str(summary['total_jumps']), 'note': '来自已保存训练记录'},
+            {'title': '最佳总分', 'value': summary['best_score'] if summary['best_score'] is not None else '--', 'note': '视觉量化评分总分'},
+            {'title': '主要动作', 'value': summary['dominant_action'], 'note': '按保存记录统计动作分布'},
         ],
-        'highlights': [
-            '继续沿用 /dashboard 路由，便于后续保持入口稳定。',
-            '保留图表容器，便于后续接入跳次、落点、动作稳定性等数据。',
-            '当前页面聚焦蹦床训练数据展示方向，便于后续继续扩展。',
-        ],
+        'sessions': sessions,
+        'offline_count': len(offline_sessions),
+        'realtime_count': len(realtime_sessions),
+        'pending_candidates': pending_candidates,
+        'action_distribution': summary['action_distribution'],
+        'source_counts': summary['source_counts'],
     }
 
 
 def _profile_context():
+    sessions = _filter_training_sessions('all')
+    summary = _training_summary(sessions)
+    recent_sessions = sorted(sessions, key=lambda item: item.get('created_at') or '', reverse=True)[:5]
     return {
         'athlete': {
             'name': '蹦床训练档案',
-            'title': '占位页（后续接入真实用户信息）',
+            'title': '训练记录驱动的个人概览',
             'joined': '2026-04',
         },
-        'cards': [
-            {
-                'title': '档案定位',
-                'items': ['保留 /profile 页面结构', '后续可接入运动员资料、器材配置、训练偏好'],
-            },
-            {
-                'title': '后续可复用模块',
-                'items': ['训练目标卡片', '周计划提醒', '历史训练摘要'],
-            },
-            {
-                'title': '当前状态',
-                'items': ['当前页先承接档案信息布局', '后续可接入真实用户数据与同步逻辑'],
-            },
-        ],
+        'summary': summary,
+        'recent_sessions': recent_sessions,
     }
 
 
@@ -670,6 +794,61 @@ def score_video(video_id):
         pass
 
     return jsonify({'success': True, 'score': score})
+
+
+@app.route('/api/training/sessions', methods=['GET'])
+def list_training_sessions():
+    source = request.args.get('source', 'all')
+    if source != 'all' and source not in TRAINING_SESSION_SOURCES:
+        return jsonify({'success': False, 'error': 'Unsupported training source'}), 400
+
+    sessions = _filter_training_sessions(source)
+    return jsonify({
+        'success': True,
+        'source': source,
+        'sessions': sessions,
+        'summary': _training_summary(sessions),
+    })
+
+
+@app.route('/api/training/sessions', methods=['POST'])
+def create_training_session():
+    data = request.get_json(silent=True) or {}
+    video_id = data.get('video_id')
+    source = _normalize_training_source(data.get('source'))
+    if not source:
+        return jsonify({'success': False, 'error': 'Unsupported training source'}), 400
+    if not video_id:
+        return jsonify({'success': False, 'error': 'video_id is required'}), 400
+
+    analysis = video_analyses.get(video_id)
+    if not analysis:
+        return jsonify({'success': False, 'status': 'not_found', 'error': 'Video ID not found'}), 404
+    if analysis.get('mode') != 'trampoline':
+        return jsonify({'success': False, 'error': 'Only trampoline training sessions are supported'}), 400
+    if analysis.get('status') != 'completed':
+        return jsonify({'success': False, 'error': 'Video analysis not yet complete'}), 400
+
+    session = _analysis_to_training_session(video_id, analysis, source)
+    sessions = _load_training_sessions()
+    replaced = False
+    for index, existing in enumerate(sessions):
+        if existing.get('id') == session['id']:
+            created_at = existing.get('created_at') or session['created_at']
+            session['created_at'] = created_at
+            sessions[index] = session
+            replaced = True
+            break
+    if not replaced:
+        sessions.append(session)
+    _save_training_sessions(sessions)
+
+    return jsonify({
+        'success': True,
+        'session': session,
+        'replaced': replaced,
+        'summary': _training_summary(sessions),
+    })
 
 
 @app.route('/api/video/llm_analysis/<video_id>', methods=['GET'])

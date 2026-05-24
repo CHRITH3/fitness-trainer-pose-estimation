@@ -3,101 +3,264 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>蹦床仪表盘</title>
+    <title>蹦床AI裁判系统 · 训练看板</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/video_analysis.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/trampoline_pages.css') }}">
 </head>
 <body>
-    <div class="container trampoline-shell-page">
-        <header>
-            <h1>蹦床仪表盘</h1>
-            <p>保留图表与摘要布局，作为后续蹦床训练数据看板的占位页。</p>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="/" class="nav-link">首页</a></li>
-                    <li><a href="/dashboard" class="nav-link active">仪表盘</a></li>
-                    <li><a href="/profile" class="nav-link">档案</a></li>
-                    <li><a href="/video_analysis" class="nav-link">视频分析</a></li>
-                </ul>
+    <div class="app-shell training-page" data-mode="training-dashboard">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-icon" aria-hidden="true">
+                    <span class="athlete-mark">⌁</span>
+                    <span class="bed-mark"></span>
+                </div>
+                <div>
+                    <h1>蹦床AI裁判系统 · 训练看板</h1>
+                    <p>训练记录 · 来源隔离 · 量化评分 · 动作分布</p>
+                </div>
+            </div>
+
+            <nav class="mode-tabs" aria-label="页面切换">
+                <a class="mode-tab" href="/">实时裁判</a>
+                <a class="mode-tab" href="/video_analysis">离线视频分析</a>
+                <a class="mode-tab active" href="/dashboard" aria-current="page">训练看板</a>
             </nav>
+
+            <div class="header-tools">
+                <div class="status-chip"><i class="dot green"></i><span>已保存 {{ sessions|length }} 组</span></div>
+                <a class="export-btn" href="/profile">档案</a>
+            </div>
         </header>
 
-        <div class="dashboard-content trampoline-dashboard-shell">
-            <div class="stats-summary">
-                {% for card in summary_cards %}
-                <div class="stat-card">
-                    <h3>{{ card.title }}</h3>
-                    <p class="stat-value">{{ card.value }}</p>
-                    <p class="stat-note">{{ card.note }}</p>
+        <main class="page-grid">
+            <section class="panel page-hero-panel">
+                <div class="panel-head">
+                    <h2>训练概览</h2>
+                    <span class="soft-label">全部来源</span>
                 </div>
-                {% endfor %}
-            </div>
-
-            <div class="charts-container">
-                <div class="chart-card">
-                    <h3>训练热度占位图</h3>
-                    <canvas id="weeklyChart"></canvas>
-                </div>
-                <div class="chart-card">
-                    <h3>动作分布占位图</h3>
-                    <canvas id="actionChart"></canvas>
-                </div>
-            </div>
-
-            <div class="project-notes trampoline-dashboard-notes">
-                <h2>当前页面定位</h2>
-                <ul class="placeholder-list">
-                    {% for item in highlights %}
-                    <li>{{ item }}</li>
+                <div class="overview-cards">
+                    {% for card in summary_cards %}
+                    <div class="overview-card">
+                        <span>{{ card.title }}</span>
+                        <strong>{{ card.value }}</strong>
+                        <em>{{ card.note }}</em>
+                    </div>
                     {% endfor %}
-                </ul>
-            </div>
-        </div>
+                </div>
+            </section>
+
+            <section class="panel source-panel">
+                <div class="panel-head">
+                    <h2>来源隔离</h2>
+                    <span class="soft-label">训练数据</span>
+                </div>
+                <div class="source-split">
+                    <button class="source-filter active" type="button" data-source="all">
+                        <span>全部</span>
+                        <b>{{ sessions|length }}</b>
+                    </button>
+                    <button class="source-filter" type="button" data-source="offline_video">
+                        <span>离线视频</span>
+                        <b>{{ offline_count }}</b>
+                    </button>
+                    <button class="source-filter" type="button" data-source="realtime_video">
+                        <span>实时视频</span>
+                        <b>{{ realtime_count }}</b>
+                    </button>
+                </div>
+            </section>
+
+            <section class="panel save-panel">
+                <div class="panel-head">
+                    <h2>保存分析结果</h2>
+                    <span class="soft-label">离线视频</span>
+                </div>
+                <div class="save-candidate-list" id="save-candidate-list">
+                    {% if pending_candidates %}
+                        {% for item in pending_candidates %}
+                        <div class="save-candidate">
+                            <div>
+                                <b>{{ item.video_id[:8] }}</b>
+                                <span>{{ item.total_jumps }} 跳 · 总分 {{ item.score_total if item.score_total is not none else '--' }}</span>
+                            </div>
+                            <button class="btn primary-btn save-session-btn" type="button" data-video-id="{{ item.video_id }}">保存</button>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="empty-panel-copy">完成一次离线视频分析后，可在这里保存到训练看板。</div>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="panel chart-panel">
+                <div class="panel-head">
+                    <h2>动作分布</h2>
+                    <span class="soft-label">已保存记录</span>
+                </div>
+                <div class="distribution-list" id="action-distribution-list"></div>
+            </section>
+
+            <section class="panel chart-panel">
+                <div class="panel-head">
+                    <h2>来源构成</h2>
+                    <span class="soft-label">离线 / 实时</span>
+                </div>
+                <div class="source-bars" id="source-bars"></div>
+            </section>
+
+            <section class="panel sessions-panel">
+                <div class="panel-head">
+                    <h2>训练记录</h2>
+                    <span class="soft-label" id="session-filter-label">全部来源</span>
+                </div>
+                <div class="table-shell dashboard-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>来源</th>
+                                <th>跳次</th>
+                                <th>最佳动作</th>
+                                <th>总分</th>
+                                <th>视频ID</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessions-body">
+                            <tr><td colspan="6">暂无保存记录</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script>
-        const weeklyData = {
-            labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-            datasets: [{
-                label: '占位数据',
-                data: [2, 3, 2, 4, 3, 1, 2],
-                backgroundColor: 'rgba(52, 152, 219, 0.45)',
-                borderColor: 'rgba(52, 152, 219, 1)',
-                borderWidth: 1,
-            }],
-        };
+        const initialSessions = {{ sessions|tojson }};
 
-        const landingData = {
-            labels: ['基础跳', '团身', '分腿', '预留动作'],
-            datasets: [{
-                data: [35, 25, 20, 20],
-                backgroundColor: [
-                    'rgba(52, 152, 219, 0.7)',
-                    'rgba(46, 204, 113, 0.7)',
-                    'rgba(155, 89, 182, 0.7)',
-                    'rgba(241, 196, 15, 0.7)'
-                ],
-                borderWidth: 1,
-            }],
-        };
+        function formatSource(source) {
+            return source === 'realtime_video' ? '实时视频' : '离线视频';
+        }
 
-        window.addEventListener('DOMContentLoaded', () => {
-            new Chart(document.getElementById('weeklyChart'), {
-                type: 'bar',
-                data: weeklyData,
-                options: { responsive: true, scales: { y: { beginAtZero: true } } },
+        function formatDate(value) {
+            if (!value) return '--';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            return date.toLocaleString('zh-CN', { hour12: false });
+        }
+
+        function primaryAction(distribution) {
+            const entries = Object.entries(distribution || {});
+            if (!entries.length) return '--';
+            entries.sort((a, b) => b[1] - a[1]);
+            return `${entries[0][0]} (${entries[0][1]})`;
+        }
+
+        function renderSessions(sessions, source = 'all') {
+            const tbody = document.getElementById('sessions-body');
+            const label = document.getElementById('session-filter-label');
+            label.textContent = source === 'all' ? '全部来源' : formatSource(source);
+            if (!sessions.length) {
+                tbody.innerHTML = '<tr><td colspan="6">暂无保存记录</td></tr>';
+                return;
+            }
+            tbody.innerHTML = sessions.map((item) => `
+                <tr>
+                    <td>${formatDate(item.created_at)}</td>
+                    <td><span class="source-badge ${item.source}">${formatSource(item.source)}</span></td>
+                    <td>${item.total_jumps || 0}</td>
+                    <td>${primaryAction(item.action_distribution)}</td>
+                    <td>${item.score_total ?? '--'}</td>
+                    <td>${(item.video_id || '').slice(0, 8)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderDistribution(sessions) {
+            const target = document.getElementById('action-distribution-list');
+            const counter = {};
+            sessions.forEach((item) => {
+                Object.entries(item.action_distribution || {}).forEach(([name, count]) => {
+                    counter[name] = (counter[name] || 0) + Number(count || 0);
+                });
             });
-            new Chart(document.getElementById('actionChart'), {
-                type: 'doughnut',
-                data: landingData,
-                options: {
-                    responsive: true,
-                    plugins: { legend: { position: 'bottom' } },
-                },
+            const entries = Object.entries(counter).sort((a, b) => b[1] - a[1]);
+            if (!entries.length) {
+                target.innerHTML = '<div class="empty-panel-copy">暂无动作分布数据</div>';
+                return;
+            }
+            const max = Math.max(...entries.map((entry) => entry[1]), 1);
+            target.innerHTML = entries.map(([name, count]) => `
+                <div class="metric-bar">
+                    <span>${name}</span>
+                    <div><i style="width: ${(count / max) * 100}%"></i></div>
+                    <b>${count}</b>
+                </div>
+            `).join('');
+        }
+
+        function renderSourceBars(sessions) {
+            const target = document.getElementById('source-bars');
+            const offline = sessions.filter((item) => item.source === 'offline_video').length;
+            const realtime = sessions.filter((item) => item.source === 'realtime_video').length;
+            const total = Math.max(offline + realtime, 1);
+            target.innerHTML = `
+                <div class="metric-bar">
+                    <span>离线视频</span>
+                    <div><i style="width: ${(offline / total) * 100}%"></i></div>
+                    <b>${offline}</b>
+                </div>
+                <div class="metric-bar realtime">
+                    <span>实时视频</span>
+                    <div><i style="width: ${(realtime / total) * 100}%"></i></div>
+                    <b>${realtime}</b>
+                </div>
+            `;
+        }
+
+        async function loadSessions(source = 'all') {
+            const response = await fetch(`/api/training/sessions?source=${encodeURIComponent(source)}`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || '训练记录读取失败');
+            renderSessions(data.sessions || [], source);
+            renderDistribution(data.sessions || []);
+            renderSourceBars(data.sessions || []);
+        }
+
+        document.querySelectorAll('.source-filter').forEach((button) => {
+            button.addEventListener('click', async () => {
+                document.querySelectorAll('.source-filter').forEach((item) => item.classList.remove('active'));
+                button.classList.add('active');
+                await loadSessions(button.dataset.source);
             });
         });
+
+        document.querySelectorAll('.save-session-btn').forEach((button) => {
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                button.textContent = '保存中';
+                try {
+                    const response = await fetch('/api/training/sessions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ video_id: button.dataset.videoId, source: 'offline_video' }),
+                    });
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.error || '保存失败');
+                    button.textContent = data.replaced ? '已更新' : '已保存';
+                    await loadSessions('all');
+                } catch (error) {
+                    button.disabled = false;
+                    button.textContent = '重试';
+                    alert(error.message);
+                }
+            });
+        });
+
+        renderSessions(initialSessions);
+        renderDistribution(initialSessions);
+        renderSourceBars(initialSessions);
     </script>
 </body>
 </html>

@@ -24,6 +24,8 @@ def test_retained_routes_return_200_and_use_trampoline_copy():
         assert response.status_code == 200, route
         html = response.get_data(as_text=True)
         assert '蹦床' in html or '视频分析' in html
+        assert 'app-shell' in html
+        assert 'topbar' in html
         assert 'Fitness Trainer' not in html
         assert 'Select Exercise' not in html
 
@@ -44,6 +46,29 @@ def test_video_analysis_defaults_to_trampoline_only():
     assert 'Trampoline Mode' not in html
     assert 'Fitness Mode' not in html
     assert 'Select Exercise' not in html
+
+
+def test_realtime_dashboard_and_profile_use_video_analysis_visual_system():
+    client = app_module.app.test_client()
+
+    realtime = client.get('/').get_data(as_text=True)
+    assert '蹦床AI裁判系统 · 实时视频页面' in realtime
+    assert '实时视频画面' in realtime
+    assert '等待连接实时相机' in realtime
+    assert 'realtime_video' in realtime
+    assert 'css/video_analysis.css' in realtime
+    assert 'css/trampoline_pages.css' in realtime
+
+    dashboard = client.get('/dashboard').get_data(as_text=True)
+    assert '蹦床AI裁判系统 · 训练看板' in dashboard
+    assert '保存分析结果' in dashboard
+    assert 'data-source="offline_video"' in dashboard
+    assert '/api/training/sessions' in dashboard
+
+    profile = client.get('/profile').get_data(as_text=True)
+    assert '蹦床AI裁判系统 · 训练档案' in profile
+    assert '训练画像' in profile
+    assert '最近训练' in profile
 
 
 def test_video_upload_rejects_missing_or_non_trampoline_type(tmp_path):

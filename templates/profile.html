@@ -3,54 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>蹦床训练档案</title>
+    <title>蹦床AI裁判系统 · 档案</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/video_analysis.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/trampoline_pages.css') }}">
 </head>
 <body>
-    <div class="container trampoline-shell-page">
-        <header>
-            <h1>🤸 蹦床训练档案</h1>
-            <p>保留页面逻辑入口，当前以中文占位态承接后续运动员档案与训练偏好。</p>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="/" class="nav-link">首页</a></li>
-                    <li><a href="/video_analysis" class="nav-link">视频分析</a></li>
-                    <li><a href="/dashboard" class="nav-link">仪表盘</a></li>
-                    <li><a href="/profile" class="nav-link active">档案</a></li>
-                </ul>
+    <div class="app-shell profile-page" data-mode="profile">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-icon" aria-hidden="true">
+                    <span class="athlete-mark">⌁</span>
+                    <span class="bed-mark"></span>
+                </div>
+                <div>
+                    <h1>蹦床AI裁判系统 · 训练档案</h1>
+                    <p>训练画像 · 得分趋势 · 来源结构 · 后续计划</p>
+                </div>
+            </div>
+
+            <nav class="mode-tabs" aria-label="页面切换">
+                <a class="mode-tab" href="/">实时裁判</a>
+                <a class="mode-tab" href="/video_analysis">离线视频分析</a>
+                <a class="mode-tab" href="/dashboard">训练看板</a>
             </nav>
+
+            <div class="header-tools">
+                <div class="status-chip"><i class="dot blue"></i><span>档案概览</span></div>
+                <a class="export-btn" href="/dashboard">返回看板</a>
+            </div>
         </header>
 
-        <div class="profile-content profile-placeholder-content">
-            <section class="profile-header profile-placeholder-header">
-                <div class="profile-avatar">
-                    <div class="avatar-circle placeholder-avatar">
-                        <span>{{ athlete.name[:2] }}</span>
-                    </div>
-                </div>
-                <div class="profile-info">
+        <main class="profile-layout">
+            <section class="panel profile-identity-panel">
+                <div class="profile-avatar-large" aria-hidden="true">{{ athlete.name[:2] }}</div>
+                <div>
+                    <span class="profile-kicker">Athlete Profile</span>
                     <h2>{{ athlete.name }}</h2>
-                    <p class="profile-title">{{ athlete.title }}</p>
-                    <p class="member-since">页面保留时间：{{ athlete.joined }}</p>
+                    <p>{{ athlete.title }}</p>
+                    <div class="profile-tags">
+                        <span>建档 {{ athlete.joined }}</span>
+                        <span>离线 / 实时分源统计</span>
+                        <span>视觉量化评分驱动</span>
+                    </div>
                 </div>
             </section>
 
-            <div class="profile-grid profile-placeholder-grid">
-                {% for card in cards %}
-                <section class="profile-card placeholder-card">
-                    <h3>{{ card.title }}</h3>
-                    <ul class="placeholder-list">
-                        {% for item in card['items'] %}
-                        <li>{{ item }}</li>
+            <section class="panel profile-score-panel">
+                <div class="panel-head">
+                    <h2>训练摘要</h2>
+                    <span class="soft-label">已保存记录</span>
+                </div>
+                <div class="overview-cards compact">
+                    <div class="overview-card">
+                        <span>训练次数</span>
+                        <strong>{{ summary.total_sessions }}</strong>
+                        <em>离线与实时合计</em>
+                    </div>
+                    <div class="overview-card">
+                        <span>累计跳次</span>
+                        <strong>{{ summary.total_jumps }}</strong>
+                        <em>按保存记录统计</em>
+                    </div>
+                    <div class="overview-card">
+                        <span>最佳总分</span>
+                        <strong>{{ summary.best_score if summary.best_score is not none else '--' }}</strong>
+                        <em>D+E+T+H-P</em>
+                    </div>
+                    <div class="overview-card">
+                        <span>主要动作</span>
+                        <strong>{{ summary.dominant_action }}</strong>
+                        <em>动作分布最高项</em>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel profile-plan-panel">
+                <div class="panel-head">
+                    <h2>训练侧重点</h2>
+                    <span class="soft-label">自动建议</span>
+                </div>
+                <div class="profile-focus-list">
+                    <div>
+                        <b>稳定落点</b>
+                        <span>优先观察 H 分与落点离散度，减少连续跳之间的横向漂移。</span>
+                    </div>
+                    <div>
+                        <b>动作质量</b>
+                        <span>结合 E 分扣分说明，关注开髋、收腿、落地控制等可解释问题。</span>
+                    </div>
+                    <div>
+                        <b>来源对比</b>
+                        <span>实时训练和离线复盘分开保存，避免不同采集方式的数据混在一起。</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel profile-history-panel">
+                <div class="panel-head">
+                    <h2>最近训练</h2>
+                    <span class="soft-label">最多 5 条</span>
+                </div>
+                <div class="profile-session-list">
+                    {% if recent_sessions %}
+                        {% for item in recent_sessions %}
+                        <div class="profile-session-item">
+                            <div>
+                                <b>{{ '实时视频' if item.source == 'realtime_video' else '离线视频' }}</b>
+                                <span>{{ item.created_at }}</span>
+                            </div>
+                            <div>
+                                <strong>{{ item.score_total if item.score_total is not none else '--' }}</strong>
+                                <span>{{ item.total_jumps }} 跳</span>
+                            </div>
+                        </div>
                         {% endfor %}
-                    </ul>
-                </section>
-                {% endfor %}
-            </div>
-        </div>
+                    {% else %}
+                        <div class="empty-panel-copy">暂无已保存训练。完成视频分析后，可先在训练看板保存记录。</div>
+                    {% endif %}
+                </div>
+            </section>
+        </main>
     </div>
 </body>
 </html>

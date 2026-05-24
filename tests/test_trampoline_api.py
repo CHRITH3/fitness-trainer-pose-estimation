@@ -232,6 +232,109 @@ def test_score_endpoint_saves_selected_jump_numbers(tmp_path):
     assert app_module.video_analyses[video_id]["score_selected_jump_numbers"] == list(range(3, 13))
 
 
+def test_training_session_save_persists_completed_offline_analysis(tmp_path):
+    client = app_module.app.test_client()
+    video_id = upload_trampoline(client, tmp_path)
+    app_module.video_analyses[video_id].update({
+        "status": "completed",
+        "progress": 100,
+        "reps": 10,
+        "completed_jumps": [
+            {
+                "jump_number": i,
+                "action": "Tuck" if i <= 6 else "Straight",
+                "flight_frames": 30,
+                "is_intermediate": False,
+                "landing": {"bed_xy_m": [0.1, 0.1], "confidence": 0.9},
+            }
+            for i in range(1, 11)
+        ],
+        "fps": 30.0,
+    })
+
+    response = client.post("/api/training/sessions", json={
+        "video_id": video_id,
+        "source": "offline_video",
+    })
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["session"]["source"] == "offline_video"
+    assert payload["session"]["total_jumps"] == 10
+    assert payload["session"]["action_distribution"] == {"Tuck": 6, "Straight": 4}
+    assert payload["session"]["score_total"] == pytest.approx(43.0)
+
+    list_response = client.get("/api/training/sessions?source=offline_video")
+    list_payload = list_response.get_json()
+    assert list_response.status_code == 200
+    assert list_payload["sessions"][0]["video_id"] == video_id
+    assert list_payload["summary"]["total_sessions"] == 1
+
+    saved_path = tmp_path / "training_sessions.json"
+    assert saved_path.exists()
+    saved_records = json.loads(saved_path.read_text(encoding="utf-8"))
+    assert saved_records[0]["id"] == f"offline_video-{video_id}"
+
+
+def test_training_sessions_filter_sources_and_reject_invalid_source(tmp_path):
+    client = app_module.app.test_client()
+    offline_id = upload_trampoline(client, tmp_path)
+    realtime_id = upload_trampoline(client, tmp_path)
+    for video_id in (offline_id, realtime_id):
+        app_module.video_analyses[video_id].update({
+            "status": "completed",
+            "progress": 100,
+            "reps": 1,
+            "completed_jumps": [{
+                "jump_number": 1,
+                "action": "Straight",
+                "flight_frames": 30,
+                "is_intermediate": False,
+                "landing": {"bed_xy_m": [0.1, 0.1], "confidence": 0.9},
+            }],
+            "fps": 30.0,
+        })
+
+    assert client.post("/api/training/sessions", json={
+        "video_id": offline_id,
+        "source": "offline_video",
+    }).status_code == 200
+    assert client.post("/api/training/sessions", json={
+        "video_id": realtime_id,
+        "source": "realtime_video",
+    }).status_code == 200
+
+    offline_payload = client.get("/api/training/sessions?source=offline_video").get_json()
+    realtime_payload = client.get("/api/training/sessions?source=realtime_video").get_json()
+    all_payload = client.get("/api/training/sessions?source=all").get_json()
+
+    assert [item["source"] for item in offline_payload["sessions"]] == ["offline_video"]
+    assert [item["source"] for item in realtime_payload["sessions"]] == ["realtime_video"]
+    assert all_payload["summary"]["total_sessions"] == 2
+
+    invalid = client.get("/api/training/sessions?source=other")
+    assert invalid.status_code == 400
+    assert invalid.get_json()["success"] is False
+
+
+def test_training_session_save_rejects_unknown_or_unfinished_video(tmp_path):
+    client = app_module.app.test_client()
+    missing = client.post("/api/training/sessions", json={
+        "video_id": "missing",
+        "source": "offline_video",
+    })
+    assert missing.status_code == 404
+
+    video_id = upload_trampoline(client, tmp_path)
+    unfinished = client.post("/api/training/sessions", json={
+        "video_id": video_id,
+        "source": "offline_video",
+    })
+    assert unfinished.status_code == 400
+    assert unfinished.get_json()["error"] == "Video analysis not yet complete"
+
+
 def test_trampoline_upload_start_and_processing_idempotency(tmp_path):
     client = app_module.app.test_client()
     video_id = upload_trampoline(client, tmp_path)
