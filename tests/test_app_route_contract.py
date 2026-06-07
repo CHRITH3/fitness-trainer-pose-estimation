@@ -56,6 +56,9 @@ def test_realtime_dashboard_and_profile_use_video_analysis_visual_system():
     assert '实时视频画面' in realtime
     assert '等待连接实时相机' in realtime
     assert 'realtime_video' in realtime
+    assert 'id="realtime-video"' in realtime
+    assert '/api/realtime/' not in realtime
+    assert 'js/realtime.js' in realtime
     assert 'css/video_analysis.css' in realtime
     assert 'css/trampoline_pages.css' in realtime
 
@@ -104,6 +107,22 @@ def test_score_route_exists_and_returns_json_error_for_unknown_video():
     response = client.post('/api/video/score/unknown-video-id', json={'selected_jump_numbers': list(range(1, 11))})
     assert response.status_code == 404
     assert response.get_json()['status'] == 'not_found'
+
+
+def test_realtime_proxy_routes_fail_cleanly_when_cpp_service_is_unavailable(monkeypatch):
+    monkeypatch.setattr(app_module, 'REALTIME_CPP_SERVER', 'http://127.0.0.1:9')
+    client = app_module.app.test_client()
+
+    response = client.get('/api/realtime/status')
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload['success'] is False
+    assert payload['connected'] is False
+    assert 'Realtime C++ service unavailable' in payload['error']
+
+    click = client.post('/api/realtime/click', json={'x': 10, 'y': 20, 'button': 'left'})
+    assert click.status_code == 503
+    assert click.get_json()['success'] is False
 
 
 def test_llm_fast_model_error_still_returns_quality_result(monkeypatch):

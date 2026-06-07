@@ -41,20 +41,21 @@
                     <span class="head-tag">待连接</span>
                 </div>
 
-                <div class="video-container realtime-video-stage">
-                    <div class="realtime-placeholder">
+                <div class="video-container realtime-video-stage" id="realtime-stage">
+                    <img id="realtime-video" class="realtime-video-feed" alt="OAK RGBD 实时视频流">
+                    <div class="realtime-placeholder" id="realtime-placeholder">
                         <div class="realtime-camera-mark" aria-hidden="true"></div>
                         <h3>等待连接实时相机</h3>
-                        <p>当前阶段先完成实时裁判界面的视觉迁移，真实摄像头推流与实时姿态分析接口后续接入。</p>
+                        <p id="realtime-placeholder-copy">启动 C++ 实时服务后，页面会自动接入 OAK RGBD 视频流。</p>
                         <div class="realtime-control-row">
-                            <button class="btn primary-btn" type="button" disabled>启动相机</button>
-                            <button class="btn" type="button" disabled>停止</button>
+                            <button class="btn primary-btn" id="connect-realtime" type="button">连接视频流</button>
+                            <button class="btn" id="stop-realtime" type="button">停止显示</button>
                             <a class="btn" href="/video_analysis">切换到离线分析</a>
                         </div>
                     </div>
                     <div class="frame-info">
-                        <p>状态：<strong>实时流待接入</strong></p>
-                        <p>保存记录时将标记为 realtime_video 来源</p>
+                        <p>状态：<strong id="realtime-connection-state">实时流待接入</strong></p>
+                        <p>画面：<strong id="realtime-frame-size">--</strong> · FPS：<strong id="realtime-fps">--</strong></p>
                     </div>
                 </div>
 
@@ -65,9 +66,9 @@
                         <span id="progress-text">待机</span>
                     </div>
                     <div class="control-buttons">
-                        <button class="btn primary-btn" disabled type="button">开始实时评分</button>
-                        <button class="btn" disabled type="button">床面标定</button>
-                        <button class="btn" disabled type="button">保存本次训练</button>
+                        <button class="btn primary-btn" id="start-record" type="button">开始记录落点</button>
+                        <button class="btn" id="clear-landing" type="button">清空落点</button>
+                        <button class="btn" id="save-landing" type="button">保存本次训练</button>
                     </div>
                 </div>
             </section>
@@ -79,7 +80,7 @@
                 </div>
                 <div class="landing-map" aria-label="实时落点图">
                     <div class="landing-map-bed"></div>
-                    <div class="landing-map-empty">等待实时落点</div>
+                    <div class="landing-map-empty" id="realtime-landing-empty">等待实时落点</div>
                 </div>
             </section>
 
@@ -117,9 +118,55 @@
                 <div class="realtime-workspace">
                     <div class="realtime-status-card">
                         <span>视频源</span>
-                        <b>未连接</b>
-                        <p>后续接入真实实时视频流后，这里承接相机、帧率和床面标定状态。</p>
+                        <b id="realtime-source-state">未连接</b>
+                        <p>检测人数 <strong id="realtime-persons">--</strong> · 推理 <strong id="realtime-inference">--</strong> ms · 同步 <strong id="realtime-sync">--</strong> ms</p>
                     </div>
+                    <div class="realtime-status-card">
+                        <span>床面标定</span>
+                        <b id="realtime-bed-state">未完成</b>
+                        <p>点击实时画面 4 个床面角点，当前 <strong id="realtime-clicks">0 / 4</strong>，落点 <strong id="realtime-landings">0</strong> 个。</p>
+                    </div>
+                </div>
+                <div class="realtime-filter-panel" aria-label="实时滤波参数">
+                    <label>深度融合 <input id="filter-blend-depth" type="range" min="0" max="100" value="0"><span id="filter-blend-depth-value">0</span></label>
+                    <label>滤波顺序
+                        <select id="filter-order-preset">
+                            <option value="0">Speckle → Spatial → Median</option>
+                            <option value="1">Spatial → Speckle → Median</option>
+                            <option value="2">Median → Speckle → Spatial</option>
+                            <option value="3">Speckle → Median → Spatial</option>
+                            <option value="4">Spatial → Median → Speckle</option>
+                            <option value="5">Median → Spatial → Speckle</option>
+                        </select>
+                    </label>
+                    <label>中值滤波
+                        <select id="filter-median-mode">
+                            <option value="0">关闭</option>
+                            <option value="1">3x3</option>
+                            <option value="2">5x5</option>
+                        </select>
+                    </label>
+                    <label><input id="filter-speckle-enable" type="checkbox" checked> 散斑滤波</label>
+                    <label>散斑范围 <input id="filter-speckle-range" type="range" min="0" max="240" value="48"><span id="filter-speckle-range-value">48</span></label>
+                    <label>散斑差值 <input id="filter-speckle-diff" type="range" min="0" max="100" value="2"><span id="filter-speckle-diff-value">2</span></label>
+                    <label><input id="filter-spatial-enable" type="checkbox" checked> 空间滤波</label>
+                    <label>空间强度 <input id="filter-spatial-alpha" type="range" min="0" max="100" value="50"><span id="filter-spatial-alpha-value">50</span></label>
+                    <label>Spatial delta <input id="filter-spatial-delta" type="range" min="0" max="200" value="3"><span id="filter-spatial-delta-value">3</span></label>
+                    <label>空洞半径 <input id="filter-spatial-hole" type="range" min="0" max="16" value="2"><span id="filter-spatial-hole-value">2</span></label>
+                    <label>迭代次数 <input id="filter-spatial-iterations" type="range" min="0" max="4" value="1"><span id="filter-spatial-iterations-value">1</span></label>
+                    <label><input id="filter-show-raw" type="checkbox"> 原始深度窗口</label>
+                    <label><input id="filter-show-filtered" type="checkbox"> 滤波深度窗口</label>
+                </div>
+                <div class="realtime-display-toggles">
+                    <button class="btn" type="button" data-realtime-action="toggle_keypoints">关键点</button>
+                    <button class="btn" type="button" data-realtime-action="toggle_skeleton">骨架</button>
+                    <button class="btn" type="button" data-realtime-action="toggle_info">信息叠加</button>
+                    <button class="btn" type="button" data-realtime-action="decrease_noise">Z阈值-</button>
+                    <button class="btn" type="button" data-realtime-action="increase_noise">Z阈值+</button>
+                    <button class="btn" type="button" data-realtime-action="decrease_window">窗口-</button>
+                    <button class="btn" type="button" data-realtime-action="increase_window">窗口+</button>
+                </div>
+                <div class="realtime-workspace">
                     <div class="realtime-status-card">
                         <span>数据来源</span>
                         <b>realtime_video</b>
@@ -152,5 +199,6 @@
             </div>
         </footer>
     </div>
+    <script src="{{ url_for('static', filename='js/realtime.js') }}"></script>
 </body>
 </html>

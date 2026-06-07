@@ -35,6 +35,23 @@
     text-align: center;
 }
 
+.realtime-placeholder.is-hidden {
+    display: none;
+}
+
+.realtime-video-feed {
+    width: 100%;
+    min-height: 100%;
+    display: none;
+    object-fit: contain;
+    background: #091527;
+    cursor: crosshair;
+}
+
+.realtime-video-stage.is-connected .realtime-video-feed {
+    display: block;
+}
+
 .realtime-camera-mark {
     width: 86px;
     height: 58px;
@@ -136,6 +153,73 @@
     color: #5c6b82;
     font-size: 13px;
     line-height: 1.55;
+}
+
+.realtime-status-card strong {
+    color: #175dde;
+}
+
+.realtime-filter-panel {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 9px;
+    padding: 0 13px 13px;
+}
+
+.realtime-filter-panel label {
+    min-height: 54px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+    border: 1px solid #dfe8f5;
+    border-radius: 8px;
+    background: #f8fbff;
+    color: #2d3b53;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.realtime-filter-panel input[type="range"] {
+    min-width: 0;
+    flex: 1;
+    accent-color: #2168f3;
+}
+
+.realtime-filter-panel input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #2168f3;
+}
+
+.realtime-filter-panel select {
+    min-width: 0;
+    width: 100%;
+    padding: 7px 8px;
+    border: 1px solid #cfdced;
+    border-radius: 6px;
+    background: #fff;
+    color: #25334d;
+    font-size: 12px;
+}
+
+.realtime-filter-panel span {
+    min-width: 24px;
+    color: #175dde;
+    text-align: right;
+}
+
+.realtime-display-toggles {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 13px 13px;
+}
+
+.realtime-display-toggles .btn {
+    min-height: 36px;
+    padding: 8px;
+    font-size: 12px;
 }
 
 .overview-cards {
@@ -453,5 +537,20 @@
     .overview-cards,
     .overview-cards.compact {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .realtime-filter-panel {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .realtime-display-toggles {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .realtime-filter-panel,
+    .realtime-display-toggles {
+        grid-template-columns: 1fr;
     }
 }

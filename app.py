@@ -16,6 +16,8 @@ import threading
 import time
 import traceback
 import uuid
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from collections import Counter
 
@@ -38,6 +40,7 @@ MAX_VIDEO_DURATION_SEC = 120
 TRAMPOLINE_PENDING_TTL_SECONDS = 60 * 60
 TRAMPOLINE_CORNER_ORDER = ["front_left", "front_right", "back_right", "back_left"]
 TRAINING_SESSION_SOURCES = {"offline_video", "realtime_video"}
+REALTIME_CPP_SERVER = os.environ.get('REALTIME_CPP_SERVER', 'http://127.0.0.1:8081').rstrip('/')
 
 
 def _training_sessions_path():
@@ -424,6 +427,88 @@ def profile():
 @app.route('/video_analysis')
 def video_analysis():
     return render_template('video_analysis.html', mode='trampoline')
+
+
+def _realtime_url(path):
+    return f"{REALTIME_CPP_SERVER}/{path.lstrip('/')}"
+
+
+def _realtime_error(exc, status=503):
+    logger.warning('Realtime service unavailable: %s', exc)
+    return jsonify({
+        'success': False,
+        'connected': False,
+        'error': 'Realtime C++ service unavailable',
+        'detail': str(exc),
+    }), status
+
+
+def _proxy_realtime_json(path, payload=None, method='GET', timeout=1.5):
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload).encode('utf-8')
+        headers['Content-Type'] = 'application/json'
+    req = urllib.request.Request(_realtime_url(path), data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            text = raw.decode('utf-8') if raw else '{}'
+            return jsonify(json.loads(text))
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        try:
+            payload = json.loads(raw.decode('utf-8')) if raw else {'success': False, 'error': str(exc)}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {'success': False, 'error': str(exc)}
+        return jsonify(payload), exc.code
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        return _realtime_error(exc)
+
+
+@app.route('/api/realtime/video_feed', methods=['GET'])
+def realtime_video_feed():
+    try:
+        upstream = urllib.request.urlopen(_realtime_url('/stream'), timeout=3.0)
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        return _realtime_error(exc)
+
+    content_type = upstream.headers.get('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+
+    def generate():
+        try:
+            while True:
+                chunk = upstream.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(generate(), content_type=content_type, headers={'Cache-Control': 'no-cache'})
+
+
+@app.route('/api/realtime/status', methods=['GET'])
+def realtime_status():
+    return _proxy_realtime_json('/status', timeout=1.0)
+
+
+@app.route('/api/realtime/click', methods=['POST'])
+def realtime_click():
+    data = request.get_json(silent=True) or {}
+    return _proxy_realtime_json('/click', payload=data, method='POST')
+
+
+@app.route('/api/realtime/filter', methods=['POST'])
+def realtime_filter():
+    data = request.get_json(silent=True) or {}
+    return _proxy_realtime_json('/filter_params', payload=data, method='POST')
+
+
+@app.route('/api/realtime/control', methods=['POST'])
+def realtime_control():
+    data = request.get_json(silent=True) or {}
+    return _proxy_realtime_json('/control', payload=data, method='POST')
 
 
 @app.route('/api/video/upload', methods=['POST'])
@@ -992,10 +1077,11 @@ if __name__ == '__main__':
         print('=' * 50)
         print('TRAMPOLINE VIDEO ANALYSIS')
         print('=' * 50)
-        print('Routes: /  /dashboard  /profile  /video_analysis')
+        print('Routes: /  /dashboard  /profile  /video_analysis  /api/realtime/*')
         print('Open http://127.0.0.1:5000 in your browser')
+        print(f'Realtime C++ service: {REALTIME_CPP_SERVER}')
         print('=' * 50)
-        app.run(debug=False, threaded=False, use_reloader=False)
+        app.run(debug=False, threaded=True, use_reloader=False)
     except Exception as exc:
         logger.error('Failed to start application: %s', exc)
         traceback.print_exc()
